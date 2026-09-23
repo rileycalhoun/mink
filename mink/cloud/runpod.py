@@ -29,6 +29,21 @@ class RunPodError(RuntimeError):
         self.status_code = status_code
 
 
+def _is_cuda_gpu(gpu: dict) -> bool:
+    """True when the catalog entry is an NVIDIA (CUDA-capable) GPU.
+
+    The transcription engine (nemo-speech.cpp on the ggml CUDA backend)
+    cannot run on non-NVIDIA hardware. The catalog also lists AMD cards
+    (Instinct/Radeon), which are sometimes cheaper and must never be picked.
+    Strict on purpose: an unrecognized card is skipped rather than risking a
+    dead pod.
+    """
+    haystack = " ".join(
+        str(gpu.get(k) or "") for k in ("id", "name", "displayName")
+    ).lower()
+    return "nvidia" in haystack
+
+
 class RunPodClient:
     """Thin wrapper over the RunPod v2 REST API."""
 
@@ -85,14 +100,17 @@ class RunPodClient:
     def ranked_gpus(self) -> list[tuple[str, float]]:
         """Return [(gpu_id, $/hr), ...] sorted cheapest-first.
 
-        GPUs the catalog flags as having capacity come first; GPUs flagged
-        NONE (or unflagged) follow as a fallback, because catalog capacity is
-        often stale and placement is the real test. Raises RunPodError when
-        the catalog has no community GPUs at all.
+        Only NVIDIA (CUDA-capable) GPUs are considered — the engine cannot
+        run on anything else. GPUs the catalog flags as having capacity come
+        first; GPUs flagged NONE (or unflagged) follow as a fallback, because
+        catalog capacity is often stale and placement is the real test.
+        Raises RunPodError when the catalog has no community CUDA GPUs.
         """
         with_capacity: list[tuple[float, str]] = []
         fallback: list[tuple[float, str]] = []
         for gpu in self.list_gpus():
+            if not _is_cuda_gpu(gpu):
+                continue
             price = (gpu.get("price") or {}).get("community")
             if not isinstance(price, (int, float)):
                 continue
@@ -109,7 +127,7 @@ class RunPodClient:
         fallback.sort()
         ranked = with_capacity + fallback
         if not ranked:
-            raise RunPodError("No GPUs with capacity in the RunPod catalog right now")
+            raise RunPodError("No CUDA GPUs with capacity in the RunPod catalog right now")
         return [(gid, price) for price, gid in ranked]
 
     def cheapest_gpu(self) -> tuple[str, float]:

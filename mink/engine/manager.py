@@ -72,7 +72,10 @@ echo "[mink] pulling models"
 nemo-speech pull parakeet-tdt
 nemo-speech pull sortformer
 echo "[mink] GPU check"
-(nvidia-smi || echo "[mink] WARNING: nvidia-smi unavailable - GPU may not be visible")
+if ! nvidia-smi; then
+  echo "[mink] FATAL: no CUDA GPU visible inside the container - aborting" >&2
+  exit 1
+fi
 echo "[mink] starting engine on :8000"
 exec nemo-speech serve \
   --asr-model parakeet-tdt \

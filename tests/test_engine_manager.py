@@ -193,14 +193,14 @@ def test_cheapest_gpu_picks_lowest_available(monkeypatch):
     client = RunPodClient("key")
     catalog = {
         "gpus": [
-            {"id": "A", "availability": "NONE", "price": {"community": 0.05}},
-            {"id": "B", "availability": "LOW", "price": {"community": 0.22}},
-            {"id": "C", "availability": "HIGH", "price": {"community": 0.16}},
-            {"id": "D", "availability": "LOW", "price": {"community": None}},
+            {"id": "NVIDIA GeForce RTX 4090", "availability": "NONE", "price": {"community": 0.05}},
+            {"id": "NVIDIA GeForce RTX 3090", "availability": "LOW", "price": {"community": 0.22}},
+            {"id": "NVIDIA RTX A4500", "availability": "HIGH", "price": {"community": 0.16}},
+            {"id": "NVIDIA L40S", "availability": "LOW", "price": {"community": None}},
         ]
     }
     monkeypatch.setattr(client, "_request", lambda *a, **k: catalog)
-    assert client.cheapest_gpu() == ("C", 0.16)
+    assert client.cheapest_gpu() == ("NVIDIA RTX A4500", 0.16)
 
 
 def test_ranked_gpus_puts_unavailable_last(monkeypatch):
@@ -209,16 +209,50 @@ def test_ranked_gpus_puts_unavailable_last(monkeypatch):
     client = RunPodClient("key")
     catalog = {
         "gpus": [
-            {"id": "A", "availability": "NONE", "price": {"community": 0.05}},
-            {"id": "B", "availability": "LOW", "price": {"community": 0.22}},
-            {"id": "C", "availability": "HIGH", "price": {"community": 0.16}},
-            {"id": "D", "availability": "LOW", "price": {"community": None}},
+            {"id": "NVIDIA GeForce RTX 4090", "availability": "NONE", "price": {"community": 0.05}},
+            {"id": "NVIDIA GeForce RTX 3090", "availability": "LOW", "price": {"community": 0.22}},
+            {"id": "NVIDIA RTX A4500", "availability": "HIGH", "price": {"community": 0.16}},
+            {"id": "NVIDIA L40S", "availability": "LOW", "price": {"community": None}},
         ]
     }
     monkeypatch.setattr(client, "_request", lambda *a, **k: catalog)
-    # C and B have catalog capacity (cheapest first); A is a stale-catalog
-    # fallback; D has no community price and is dropped.
-    assert client.ranked_gpus() == [("C", 0.16), ("B", 0.22), ("A", 0.05)]
+    # A4500 and 3090 have catalog capacity (cheapest first); 4090 is a
+    # stale-catalog fallback; L40S has no community price and is dropped.
+    assert client.ranked_gpus() == [
+        ("NVIDIA RTX A4500", 0.16),
+        ("NVIDIA GeForce RTX 3090", 0.22),
+        ("NVIDIA GeForce RTX 4090", 0.05),
+    ]
+
+
+def test_ranked_gpus_excludes_non_cuda_hardware(monkeypatch):
+    """AMD/Intel cards must never be picked, even when cheaper."""
+    from mink.cloud.runpod import RunPodClient
+
+    client = RunPodClient("key")
+    catalog = {
+        "gpus": [
+            {"id": "AMD Instinct MI210", "availability": "HIGH", "price": {"community": 0.10}},
+            {"id": "AMD Radeon PRO V620", "availability": "HIGH", "price": {"community": 0.08}},
+            {"id": "NVIDIA GeForce RTX 3080 Ti", "availability": "HIGH", "price": {"community": 0.18}},
+        ]
+    }
+    monkeypatch.setattr(client, "_request", lambda *a, **k: catalog)
+    assert client.ranked_gpus() == [("NVIDIA GeForce RTX 3080 Ti", 0.18)]
+
+
+def test_ranked_gpus_raises_when_only_non_cuda(monkeypatch):
+    from mink.cloud.runpod import RunPodClient, RunPodError
+
+    client = RunPodClient("key")
+    catalog = {
+        "gpus": [
+            {"id": "AMD Instinct MI300X", "availability": "HIGH", "price": {"community": 0.30}},
+        ]
+    }
+    monkeypatch.setattr(client, "_request", lambda *a, **k: catalog)
+    with pytest.raises(RunPodError, match="No CUDA GPUs"):
+        client.ranked_gpus()
 
 
 def test_start_stops_on_non_placement_error(manager, monkeypatch):
