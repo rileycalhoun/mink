@@ -302,10 +302,9 @@ def generate_summary(session_id: str) -> JSONResponse:
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Summarization failed: {exc}") from exc
     session.set_summary(summary)
-    session.save()
     _attach_verdict(session)
     session.save()
-    return JSONResponse(summary.to_dict())
+    return JSONResponse(session.summary)
 
 
 def _attach_verdict(session: LectureSession) -> None:
