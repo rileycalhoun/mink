@@ -341,6 +341,20 @@ def export_session(session_id: str, format: str = "md") -> Response:
 # ---------------------------------------------------------------------------
 
 
+async def _ws_send(websocket: WebSocket, payload: dict, timeout: float = 10.0) -> bool:
+    """Send JSON over the live socket with a timeout.
+
+    A half-open (silently dead) socket blocks send_json() forever. Never let
+    that stall finalization — by the time we send "done" the session is
+    already saved, so a failed send just means the client is gone.
+    """
+    try:
+        await asyncio.wait_for(websocket.send_json(payload), timeout)
+        return True
+    except Exception:  # noqa: BLE001 — any send failure means the client is gone
+        return False
+
+
 async def _finalize_heartbeat(websocket: WebSocket) -> None:
     """Send `finalize_progress` every 15 s until cancelled.
 
@@ -350,11 +364,10 @@ async def _finalize_heartbeat(websocket: WebSocket) -> None:
     start = time.monotonic()
     while True:
         await asyncio.sleep(15)
-        try:
-            await websocket.send_json(
-                {"type": "finalize_progress", "elapsed_s": int(time.monotonic() - start)}
-            )
-        except Exception:  # noqa: BLE001 — socket died; stop beating
+        if not await _ws_send(
+            websocket,
+            {"type": "finalize_progress", "elapsed_s": int(time.monotonic() - start)},
+        ):
             return
 
 
@@ -393,7 +406,8 @@ async def live_ws(websocket: WebSocket) -> None:
                     if session is None:
                         await websocket.send_json({"type": "error", "message": "no live session"})
                         continue
-                    await websocket.send_json({"type": "finalizing"})
+                    if not await _ws_send(websocket, {"type": "finalizing"}):
+                        return  # client already gone; skip the expensive pass
                     # Heartbeat while the full diarized pass runs: the client
                     # shows elapsed time and treats a silent socket as dead
                     # instead of hanging on "Finalizing…" forever.
@@ -402,12 +416,13 @@ async def live_ws(websocket: WebSocket) -> None:
                         # Full diarized pass over the whole recording.
                         await asyncio.to_thread(session.finalize)
                     except Exception as exc:  # noqa: BLE001 — report engine failures to client
-                        await websocket.send_json({"type": "error", "message": str(exc)})
-                        continue
+                        await _ws_send(websocket, {"type": "error", "message": str(exc)})
+                        return
                     finally:
                         beat.cancel()
                     live_manager.remove(session.id)
-                    await websocket.send_json({"type": "done", "session_id": session.id})
+                    # Session is saved; don't hang on a half-open socket here.
+                    await _ws_send(websocket, {"type": "done", "session_id": session.id})
                     return
             elif "bytes" in message:
                 if session is None:
