@@ -71,7 +71,7 @@ class AudioRecorder:
                 wf.setsampwidth(self.SAMPLE_WIDTH)
                 wf.setframerate(self.SAMPLE_RATE)
 
-                def _callback(indata, frames, time_info, status):  # noqa: ANN001, ANN202
+                def _callback(indata, frames, time_info, status):
                     if status:
                         print(f"audio status: {status}")
                     wf.writeframes(indata.tobytes())

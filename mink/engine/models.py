@@ -8,7 +8,7 @@ Model weights are published by NVIDIA under CC-BY-4.0. They are downloaded
 at setup time, never redistributed with this repository.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass(frozen=True)

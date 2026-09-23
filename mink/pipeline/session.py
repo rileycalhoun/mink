@@ -81,7 +81,7 @@ class LectureSession:
         return path
 
     @classmethod
-    def load(cls, session_id: str) -> "LectureSession":
+    def load(cls, session_id: str) -> LectureSession:
         path = settings.sessions_dir / f"{session_id}.json"
         data = json.loads(path.read_text())
         data["created_at"] = datetime.fromisoformat(data["created_at"])

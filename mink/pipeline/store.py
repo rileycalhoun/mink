@@ -31,11 +31,7 @@ class SessionStore:
         for session in self.list():
             if not session.transcript:
                 continue
-            lines = [
-                seg.text
-                for seg in session.transcript.segments
-                if query in seg.text.lower()
-            ]
+            lines = [seg.text for seg in session.transcript.segments if query in seg.text.lower()]
             if lines or query in session.transcript.text.lower():
                 hits.append((session, lines[:5]))
         return hits

@@ -4,11 +4,11 @@ from .client import EngineClient, TranscriptionResult, TranscriptionSegment
 from .models import MODELS, ModelInfo, default_model, get_model
 
 __all__ = [
+    "MODELS",
     "EngineClient",
+    "ModelInfo",
     "TranscriptionResult",
     "TranscriptionSegment",
-    "MODELS",
-    "ModelInfo",
     "default_model",
     "get_model",
 ]

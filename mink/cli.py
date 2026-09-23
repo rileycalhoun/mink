@@ -10,7 +10,7 @@ from rich.table import Table
 
 from mink import __version__
 from mink.config import settings
-from mink.engine import EngineClient, MODELS, get_model
+from mink.engine import MODELS, EngineClient, get_model
 from mink.pipeline import LectureSession, SessionStore
 
 app = typer.Typer(help="Mink — open-source lecture recording and transcription.")
@@ -113,7 +113,9 @@ def search(query: str = typer.Argument(..., help="Text to search for")) -> None:
         console.print("No matches.")
         return
     for session, lines in hits:
-        console.print(f"\n[bold]{session.title or session.id}[/bold] ({session.course or 'no course'})")
+        console.print(
+            f"\n[bold]{session.title or session.id}[/bold] ({session.course or 'no course'})"
+        )
         for line in lines:
             console.print(f"  …{line.strip()}")
 
