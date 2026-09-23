@@ -181,8 +181,66 @@ def summarize(session_id: str = typer.Argument(..., help="Session ID")) -> None:
     with console.status("Summarizing..."):
         summary = summarize_session(session, provider)
     session.set_summary(summary)
+    _run_faithfulness_gate(session)
     session.save()
     console.print(f"[green]Done.[/green] {summary.tldr}")
+
+
+def _run_faithfulness_gate(session: LectureSession) -> bool:
+    """Run the Jev faithfulness gate on a session's summary, if configured.
+
+    Attaches the verdict to the summary and reports it. Returns True when a
+    verdict was produced; skips gracefully (with a one-line hint) when no
+    Jev API key is configured.
+    """
+    from mink.decision import DecisionNotConfigured, evaluate_session, get_decision_provider
+
+    if not session.summary:
+        return False
+    try:
+        provider = get_decision_provider()
+    except DecisionNotConfigured:
+        console.print("[dim]Skipping faithfulness gate (set MINK_JEV_API_KEY to enable).[/dim]")
+        return False
+    try:
+        verdict = evaluate_session(session, provider)
+    except Exception as exc:  # noqa: BLE001 — gate must not break summaries
+        console.print(f"[yellow]Faithfulness gate failed: {exc}[/yellow]")
+        return False
+    session.summary["verdict"] = verdict.to_dict()
+    color = "green" if verdict.faithfulness == "faithful" else "yellow"
+    console.print(
+        f"[{color}]Jev: {verdict.faithfulness} "
+        f"(confidence {verdict.faithfulness_confidence:.2f}, "
+        f"quality {verdict.quality_score:.1f}/4)[/]"
+    )
+    if verdict.review_recommended:
+        console.print("[yellow]⚠ Jev recommends a human review of this summary.[/yellow]")
+    return True
+
+
+@app.command()
+def verdict(session_id: str = typer.Argument(..., help="Session ID")) -> None:
+    """Run the Jev faithfulness gate on an existing summary (needs MINK_JEV_API_KEY)."""
+    from mink.decision import DecisionNotConfigured, evaluate_session, get_decision_provider
+
+    session = LectureSession.load(session_id)
+    if not session.summary:
+        console.print("[red]Session has no summary yet — run `mink summarize` first.[/red]")
+        raise typer.Exit(1)
+    try:
+        provider = get_decision_provider()
+    except DecisionNotConfigured as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    with console.status("Verifying summary with Jev..."):
+        result = evaluate_session(session, provider)
+    session.summary["verdict"] = result.to_dict()
+    session.save()
+    console.print(
+        f"[green]Done.[/green] Verdict: {result.faithfulness} "
+        f"(confidence {result.faithfulness_confidence:.2f})"
+    )
 
 
 @app.command()

@@ -22,6 +22,8 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from mink import __version__
 from mink.config import settings
+from mink.decision import DecisionNotConfigured as _DecisionNotConfigured
+from mink.decision import decision_status, evaluate_session, get_decision_provider
 from mink.engine import EngineClient, engine_manager
 from mink.llm import get_provider, provider_status, summarize_session
 from mink.llm.providers import LLMNotConfigured
@@ -97,6 +99,7 @@ def health() -> dict:
         "engine_reachable": engine.health(),
         "engine_url": settings.engine_url,
         "llm": provider_status(),
+        "decision": decision_status(),
     }
 
 
@@ -299,8 +302,22 @@ def generate_summary(session_id: str) -> JSONResponse:
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Summarization failed: {exc}") from exc
     session.set_summary(summary)
+    _attach_verdict(session)
     session.save()
-    return JSONResponse(summary.to_dict())
+    return JSONResponse(session.summary)
+
+
+def _attach_verdict(session: LectureSession) -> None:
+    """Run the Jev faithfulness gate when a key is configured; never raises."""
+    try:
+        provider = get_decision_provider()
+    except _DecisionNotConfigured:
+        return
+    try:
+        verdict = evaluate_session(session, provider)
+    except Exception:  # noqa: BLE001 — the gate must not break summaries
+        return
+    session.summary["verdict"] = verdict.to_dict()
 
 
 # ---------------------------------------------------------------------------
