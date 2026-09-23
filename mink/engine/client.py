@@ -14,6 +14,7 @@ segments itself (see :func:`_segments_from_words`).
 
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -32,6 +33,36 @@ _RETRY_BACKOFF_S = 5.0
 _MIN_WORDS_PER_SEGMENT = 6
 _MAX_WORDS_PER_SEGMENT = 24
 _SENTENCE_END = (".", "!", "?")
+_SPEAKER_RE = re.compile(r"SPEAKER_\d+")
+
+
+def _normalize_speaker(raw: object) -> str | None:
+    """Canonicalize an engine speaker label to ``SPEAKER_XX`` (or ``None``).
+
+    nemo-speech.cpp's diarization emits the speaker as a 1-based integer
+    (``1`` for the first speaker); other engines may already emit
+    ``SPEAKER_00``-style strings. The rest of Mink (exports, UI, tests)
+    speaks the zero-based ``SPEAKER_XX`` string form, so normalize here —
+    at the boundary — rather than scattering coercion through consumers.
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, bool):
+        return None
+    if isinstance(raw, (int, float)):
+        n = int(raw)
+        if n < 1:
+            return None
+        return f"SPEAKER_{n - 1:02d}"
+    text = str(raw).strip()
+    if not text:
+        return None
+    if _SPEAKER_RE.fullmatch(text):
+        return text
+    if text.isdigit():
+        n = int(text)
+        return f"SPEAKER_{n - 1:02d}" if n >= 1 else None
+    return text
 
 
 def _segments_from_words(words: list[dict]) -> list[TranscriptionSegment]:
@@ -67,7 +98,7 @@ def _segments_from_words(words: list[dict]) -> list[TranscriptionSegment]:
         word = str(w.get("word") or w.get("text") or "").strip()
         if not word:
             continue
-        speaker = w.get("speaker")
+        speaker = _normalize_speaker(w.get("speaker"))
         start = float(w.get("start", cur_end or 0.0))
         end = float(w.get("end", start))
         if cur and speaker != cur_speaker:

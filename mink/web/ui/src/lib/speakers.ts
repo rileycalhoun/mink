@@ -23,16 +23,17 @@ function hashLabel(label: string): number {
 	return Math.abs(h);
 }
 
-/** Stable accent color for a speaker label. */
-export function speakerColor(label: string | null | undefined): string {
-	if (!label) return '#94a3b8';
-	return PALETTE[hashLabel(label) % PALETTE.length];
+/** Stable accent color for a speaker label. Never throws on odd payloads. */
+export function speakerColor(label: string | number | null | undefined): string {
+	if (label === null || label === undefined || label === '') return '#94a3b8';
+	return PALETTE[hashLabel(String(label)) % PALETTE.length];
 }
 
-/** "SPEAKER_00" -> "Speaker 1"; anything else passes through trimmed. */
-export function prettySpeaker(label: string | null | undefined): string {
-	if (!label) return 'Unknown';
-	const m = /^SPEAKER_(\d+)$/.exec(label.trim());
+/** "SPEAKER_00" -> "Speaker 1"; anything else passes through trimmed. Never throws. */
+export function prettySpeaker(label: string | number | null | undefined): string {
+	if (label === null || label === undefined || label === '') return 'Unknown';
+	const text = String(label).trim();
+	const m = /^SPEAKER_(\d+)$/.exec(text);
 	if (m) return `Speaker ${parseInt(m[1], 10) + 1}`;
-	return label.trim();
+	return text || 'Unknown';
 }

@@ -69,3 +69,42 @@ def test_missing_timings_default_sensibly():
     assert len(segs) == 1
     assert segs[0].start == 0.0
     assert segs[0].text == "hello"
+
+
+def test_numeric_speaker_normalized_to_canonical_label():
+    # nemo-speech.cpp emits 1-based integer speaker ids; Mink canonicalizes
+    # to zero-based SPEAKER_XX strings (the form exports and the UI expect).
+    words = [
+        _word("Hello,", 1.2, 1.8, speaker=1),
+        _word("testing.", 1.8, 2.24, speaker=1),
+    ]
+    segs = _segments_from_words(words)
+    assert len(segs) == 1
+    assert segs[0].speaker == "SPEAKER_00"
+
+
+def test_numeric_speakers_break_segments_and_map_in_order():
+    words = [
+        _word("Hi", 0.0, 0.3, speaker=1),
+        _word("there.", 0.3, 0.6, speaker=1),
+        _word("Hello!", 1.0, 1.3, speaker=2),
+    ]
+    segs = _segments_from_words(words)
+    assert len(segs) == 2
+    assert segs[0].speaker == "SPEAKER_00"
+    assert segs[1].speaker == "SPEAKER_01"
+
+
+def test_speaker_normalization_edge_cases():
+    from mink.engine.client import _normalize_speaker
+
+    assert _normalize_speaker(None) is None
+    assert _normalize_speaker("SPEAKER_00") == "SPEAKER_00"
+    assert _normalize_speaker("  SPEAKER_01  ") == "SPEAKER_01"
+    assert _normalize_speaker(1) == "SPEAKER_00"
+    assert _normalize_speaker(2) == "SPEAKER_01"
+    assert _normalize_speaker("1") == "SPEAKER_00"
+    assert _normalize_speaker("Lecturer") == "Lecturer"
+    assert _normalize_speaker(0) is None
+    assert _normalize_speaker(True) is None
+    assert _normalize_speaker("") is None
