@@ -14,6 +14,7 @@ from pathlib import Path
 import httpx
 
 from mink.config import settings
+from mink.engine.manager import engine_manager
 
 
 @dataclass
@@ -36,11 +37,26 @@ class EngineError(RuntimeError):
 
 
 class EngineClient:
-    """Thin client over the local nemo-speech.cpp server."""
+    """Thin client over the nemo-speech.cpp transcription server.
 
-    def __init__(self, base_url: str | None = None, timeout: float = 600.0) -> None:
-        self.base_url = (base_url or settings.engine_url).rstrip("/")
+    When the on-demand engine manager has a pod up, the base URL and bearer
+    token come from it automatically; otherwise the static settings apply.
+    """
+
+    def __init__(
+        self,
+        base_url: str | None = None,
+        api_key: str | None = None,
+        timeout: float = 600.0,
+    ) -> None:
+        self.base_url = (base_url or engine_manager.engine_url).rstrip("/")
+        self.api_key = api_key or engine_manager.api_key
         self.timeout = timeout
+
+    def _headers(self) -> dict[str, str]:
+        if self.api_key:
+            return {"Authorization": f"Bearer {self.api_key}"}
+        return {}
 
     def health(self) -> bool:
         """Return True if the engine server is reachable."""
@@ -48,7 +64,7 @@ class EngineClient:
             # trust_env=False: the engine is local, so proxy env vars must
             # never apply (and must never break URL parsing).
             with httpx.Client(trust_env=False, timeout=5.0) as client:
-                resp = client.get(f"{self.base_url}/health")
+                resp = client.get(f"{self.base_url}/health", headers=self._headers())
                 return resp.status_code < 500
         except Exception:  # noqa: BLE001 — any failure means "not reachable"
             return False
@@ -61,6 +77,7 @@ class EngineClient:
         diarize: bool = True,
     ) -> TranscriptionResult:
         """Transcribe an audio file; returns text plus timestamped segments."""
+        engine_manager.touch()
         model = model or settings.default_model
         data: dict[str, str] = {
             "model": model,
@@ -79,6 +96,7 @@ class EngineClient:
                     f"{self.base_url}/v1/audio/transcriptions",
                     data=data,
                     files=files,
+                    headers=self._headers(),
                 )
             resp.raise_for_status()
         except httpx.HTTPError as exc:

@@ -3,17 +3,9 @@
 	import { resolve } from '$app/paths';
 	import type { Snippet } from 'svelte';
 	import Icon from '$lib/Icon.svelte';
-	import { getHealth } from '$lib/api';
+	import EnginePill from '$lib/EnginePill.svelte';
 
 	let { children }: { children: Snippet } = $props();
-
-	let engineOk = $state<boolean | null>(null);
-
-	$effect(() => {
-		getHealth()
-			.then((h) => (engineOk = h.engine_reachable))
-			.catch(() => (engineOk = false));
-	});
 </script>
 
 <header class="nav glass">
@@ -28,28 +20,7 @@
 				<span class="pulse-dot live" aria-hidden="true"></span> Live record
 			</a>
 		</nav>
-		<div
-			class="engine-pill"
-			title={engineOk === null
-				? 'Checking transcription engine…'
-				: engineOk
-					? 'Transcription engine is ready'
-					: 'Transcription engine is offline'}
-		>
-			<span
-				class="pulse-dot"
-				class:live={engineOk === true}
-				style:background={engineOk === true
-					? 'var(--accent)'
-					: engineOk === false
-						? 'var(--warning)'
-						: 'var(--border)'}
-				aria-hidden="true"
-			></span>
-			<span class="engine-label">
-				{engineOk === null ? 'Checking…' : engineOk ? 'Engine ready' : 'Engine offline'}
-			</span>
-		</div>
+		<EnginePill />
 	</div>
 </header>
 
@@ -137,20 +108,6 @@
 		color: #86efac;
 	}
 
-	.engine-pill {
-		display: inline-flex;
-		align-items: center;
-		gap: 0.5rem;
-		padding: 0.4rem 0.8rem;
-		border-radius: 999px;
-		border: 1px solid rgba(148, 163, 184, 0.18);
-		background: rgba(148, 163, 184, 0.07);
-		font-size: 0.8rem;
-		font-weight: 600;
-		color: var(--muted-text);
-		white-space: nowrap;
-	}
-
 	.main {
 		max-width: 1200px;
 		margin: 0 auto;
@@ -169,10 +126,6 @@
 	}
 
 	@media (max-width: 640px) {
-		.engine-label {
-			display: none;
-		}
-
 		.nav-inner {
 			gap: 0.9rem;
 		}

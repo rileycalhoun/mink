@@ -84,3 +84,17 @@ export interface LiveSegment {
 	end: number;
 	text: string;
 }
+
+/** On-demand engine (RunPod pod) status. */
+export interface EngineStatus {
+	state: 'off' | 'provisioning' | 'ready' | 'error';
+	configured: boolean;
+	pod_id: string | null;
+	gpu: string | null;
+	price_per_hr: number | null;
+	engine_url: string;
+	uptime_s: number | null;
+	idle_s: number | null;
+	idle_timeout_s: number;
+	error: string | null;
+}

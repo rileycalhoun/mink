@@ -44,6 +44,13 @@ class Settings(BaseSettings):
     # Chunks quieter than this RMS are skipped (saves engine calls).
     live_silence_rms: float = Field(default=120.0)
 
+    # --- On-demand cloud engine (RunPod) ---
+    # API key for RunPod; when unset, the on-demand engine is disabled and
+    # Mink uses the static engine_url above.
+    runpod_api_key: str | None = Field(default=None)
+    # Terminate the GPU pod after this many idle minutes (0 disables auto-stop).
+    runpod_idle_minutes: int = Field(default=20)
+
     @property
     def sessions_dir(self) -> Path:
         return self.data_dir / "sessions"

@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
 # Set up the Mink transcription engine: nemo-speech.cpp + NVIDIA ASR models.
 #
-# Installs nemo-speech.cpp (if needed), pulls the default transcription model
-# and the Sortformer diarization companion, then starts the OpenAI-compatible
-# server Mink talks to.
+# Pulls the default transcription model and the Sortformer diarization
+# companion, then starts the OpenAI-compatible server Mink talks to.
+# (Install nemo-speech.cpp first: https://github.com/NVIDIA/NeMo-Speech.cpp —
+# prebuilt binaries or build from source; needs no Python ML stack.)
 #
 # Usage:
-#   scripts/setup-engine.sh            # default models, serve on :8000
-#   scripts/setup-engine.sh --pull-only # just download models, don't serve
+#   scripts/setup-engine.sh              # default models, serve on :8000
+#   scripts/setup-engine.sh --pull-only  # just download models, don't serve
 set -euo pipefail
 
-MODEL="${MINK_MODEL:-parakeet-tdt-0.6b-v3}"
-DIAR="${MINK_DIAR_MODEL:-sortformer-v2}"
+MODEL="${MINK_MODEL:-parakeet-tdt}"
+DIAR="${MINK_DIAR_MODEL:-sortformer}"
 PORT="${MINK_ENGINE_PORT:-8000}"
-MODELS_DIR="${MINK_MODELS_DIR:-$HOME/.local/share/mink/models}"
 
 PULL_ONLY=0
 for arg in "$@"; do
@@ -25,29 +25,24 @@ done
 
 if ! command -v nemo-speech >/dev/null 2>&1; then
   echo "nemo-speech not found."
-  echo "Install nemo-speech.cpp first: https://github.com/nvidia/nemo-speech.cpp"
-  echo "(prebuilt binaries or build from source; needs no Python ML stack)"
+  echo "Install it first: https://github.com/NVIDIA/NeMo-Speech.cpp"
   exit 1
 fi
 
-mkdir -p "$MODELS_DIR"
-
 echo "==> Pulling transcription model: $MODEL"
-nemo-speech pull "$MODEL" --out-dir "$MODELS_DIR"
+nemo-speech pull "$MODEL"
 
 echo "==> Pulling diarization companion: $DIAR"
-# Sortformer v2 GGUF; converted once and reused across ASR models.
-python3 "$(dirname "$(command -v nemo-speech)")/../share/nemo-speech/convert_model.py" \
-  nvidia/diar_streaming_sortformer_4spk-v2 \
-  --outfile "$MODELS_DIR/sortformer-v2-f32.gguf" || true
+nemo-speech pull "$DIAR"
 
 if [[ "$PULL_ONLY" -eq 1 ]]; then
-  echo "Models ready in $MODELS_DIR"
+  echo "Models ready (see: nemo-speech model list)"
   exit 0
 fi
 
 echo "==> Starting engine server on 127.0.0.1:$PORT"
 exec nemo-speech serve \
-  --model "$MODELS_DIR/$MODEL.gguf" \
-  --diar-model "$MODELS_DIR/sortformer-v2-f32.gguf" \
-  --host 127.0.0.1 --port "$PORT"
+  --asr-model "$MODEL" \
+  --diar-model "$DIAR" \
+  --host 127.0.0.1 --port "$PORT" \
+  --no-ui

@@ -21,7 +21,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from mink import __version__
 from mink.config import settings
-from mink.engine import EngineClient
+from mink.engine import EngineClient, engine_manager
 from mink.llm import get_provider, provider_status, summarize_session
 from mink.llm.providers import LLMNotConfigured
 from mink.pipeline import EXPORTERS, LectureSession, LiveSessionManager, SessionStore
@@ -29,6 +29,12 @@ from mink.pipeline import EXPORTERS, LectureSession, LiveSessionManager, Session
 app = FastAPI(title="Mink", version=__version__)
 store = SessionStore()
 live_manager = LiveSessionManager()
+
+
+@app.on_event("startup")
+def _reconcile_engine() -> None:
+    # Re-adopt a live on-demand pod after a restart, if we still hold its key.
+    engine_manager.reconcile()
 
 
 # ---------------------------------------------------------------------------
@@ -118,6 +124,29 @@ def search(q: str) -> list[dict]:
         {"id": s.id, "title": s.title, "course": s.course, "matches": lines}
         for s, lines in store.search(q)
     ]
+
+
+# ---------------------------------------------------------------------------
+# On-demand engine (RunPod GPU pod)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/engine")
+def engine_status() -> dict:
+    return engine_manager.status()
+
+
+@app.post("/api/engine/start")
+def engine_start() -> JSONResponse:
+    try:
+        return JSONResponse(engine_manager.start())
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.post("/api/engine/stop")
+def engine_stop() -> JSONResponse:
+    return JSONResponse(engine_manager.stop())
 
 
 @app.post("/api/transcribe")

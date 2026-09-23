@@ -113,6 +113,17 @@ All settings are environment variables prefixed with `MINK_`:
 | `MINK_DEFAULT_MODEL` | `parakeet-tdt-0.6b-v3` | transcription model |
 | `MINK_DATA_DIR` | `~/.local/share/mink` | sessions + audio |
 | `MINK_WEB_PORT` | `8473` | `mink serve` port |
+| `MINK_RUNPOD_API_KEY` | _(unset)_ | enables the on-demand cloud engine |
+| `MINK_RUNPOD_IDLE_MINUTES` | `20` | terminate the GPU pod after N idle minutes (`0` = never) |
+
+## On-demand cloud engine
+
+No local GPU? Set `MINK_RUNPOD_API_KEY` and the engine pill in the web UI
+becomes a start/stop control: it spins up the cheapest RunPod GPU with
+current capacity, waits for the engine to become healthy, and terminates the
+pod after `MINK_RUNPOD_IDLE_MINUTES` of inactivity — so you only pay for the
+minutes you transcribe. The pod's engine requires a per-pod bearer token,
+generated at start time and never stored in the repo.
 
 ## Project layout
 

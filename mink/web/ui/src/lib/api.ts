@@ -1,6 +1,7 @@
 /** Typed fetch wrappers for the Mink FastAPI backend (same origin). */
 
 import type {
+	EngineStatus,
 	HealthResponse,
 	SearchHit,
 	SessionDetail,
@@ -34,6 +35,14 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const getHealth = () => api<HealthResponse>('/api/health');
+
+export const getEngineStatus = () => api<EngineStatus>('/api/engine');
+
+export const startEngine = () =>
+	api<EngineStatus>('/api/engine/start', { method: 'POST' });
+
+export const stopEngine = () =>
+	api<EngineStatus>('/api/engine/stop', { method: 'POST' });
 
 export const listSessions = () => api<SessionListItem[]>('/api/sessions');
 
