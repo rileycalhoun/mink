@@ -204,7 +204,14 @@ class EngineManager:
             client = self._client()
             pod_id = gpu_id = price = None
             last_error: Exception | None = None
+            skipped = {
+                g.strip()
+                for g in settings.runpod_skip_gpus.split(",")
+                if g.strip()
+            }
             for gid, gpu_price in client.ranked_gpus():
+                if gid in skipped:
+                    continue
                 api_key = secrets.token_urlsafe(32)
                 body = {
                     "name": POD_NAME,

@@ -50,6 +50,9 @@ class Settings(BaseSettings):
     runpod_api_key: str | None = Field(default=None)
     # Terminate the GPU pod after this many idle minutes (0 disables auto-stop).
     runpod_idle_minutes: int = Field(default=20)
+    # Comma-separated RunPod GPU ids to never provision (e.g. a GPU pool
+    # whose hosts have broken CUDA passthrough). Empty disables.
+    runpod_skip_gpus: str = Field(default="")
 
     @property
     def sessions_dir(self) -> Path:

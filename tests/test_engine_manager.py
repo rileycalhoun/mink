@@ -417,3 +417,19 @@ def test_start_clears_boot_log(manager, monkeypatch):
     assert manager.boot_log()["log"] != "stale"
     manager.stop()
     assert manager.boot_log() == {"pod_id": None, "state": "off", "log": ""}
+
+
+def test_start_skips_configured_gpus(manager, monkeypatch):
+    """GPUs in MINK_RUNPOD_SKIP_GPUS are never attempted."""
+    monkeypatch.setattr(settings, "runpod_skip_gpus", "NVIDIA RTX A5000")
+    fake = FakeRunPod()
+    monkeypatch.setattr(manager, "_client", lambda: fake)
+    _healthy(monkeypatch)
+
+    status = manager.start()
+    assert status["state"] in (
+        EngineState.PROVISIONING.value,
+        EngineState.READY.value,
+    )
+    assert fake.attempted_gpu_ids == ["NVIDIA RTX 3090"]
+    assert _wait_for(manager, EngineState.READY), "worker should reach READY"
