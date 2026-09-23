@@ -17,11 +17,12 @@ class SessionStore:
         sessions: list[LectureSession] = []
         if not self.sessions_dir.exists():
             return sessions
-        for path in sorted(self.sessions_dir.glob("*.json")):
+        for path in self.sessions_dir.glob("*.json"):
             try:
                 sessions.append(LectureSession.load(path.stem))
             except (json.JSONDecodeError, KeyError, ValueError):
                 continue
+        sessions.sort(key=lambda s: s.created_at, reverse=True)
         return sessions
 
     def search(self, query: str) -> list[tuple[LectureSession, list[str]]]:

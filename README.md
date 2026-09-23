@@ -42,9 +42,59 @@ mink sessions
 mink show <session-id>
 mink search "recursion"
 
-# 5. Web API
+# 5. Web UI (Svelte)
 mink serve  # http://127.0.0.1:8473
 ```
+
+The UI is a SvelteKit app in `mink/web/ui/`. Build it once:
+
+```bash
+cd mink/web/ui && npm install && npm run build
+```
+
+`mink serve` then serves the app itself from `/` (API stays under `/api/*`).
+Pages: library with search, live transcription view, session detail with
+audio-synced transcript, summaries, and export (Markdown / TXT / SRT / VTT).
+
+## Live transcription
+
+Open the web UI and hit **Live record**, or stream 16 kHz mono Int16 PCM
+over `ws://127.0.0.1:8473/api/live/ws`:
+
+```
+→ {"type": "start", "title": "Lecture 1", "course": "CS 101"}
+← {"type": "started", "session_id": "…"}
+→ <binary PCM frames>
+← {"type": "partial", "segments": [{"start": 0.0, "end": 3.2, "text": "…"}], …}
+→ {"type": "stop"}
+← {"type": "finalizing"}
+← {"type": "done", "session_id": "…"}
+```
+
+Live windows are transcribed in 12 s overlapping chunks; stopping runs a
+full diarized pass with the default model to produce the final transcript.
+
+## Summaries (LLM)
+
+Summaries run through `mink/llm`, a provider abstraction so future LLM
+features (Q&A, flashcards) plug into one seam — no vendor SDKs in app code.
+
+| `MINK_LLM_PROVIDER` | Backend |
+|---|---|
+| `ollama` (default) | Local Ollama at `http://127.0.0.1:11434` |
+| `openai` | Any OpenAI-compatible `/chat/completions` endpoint |
+| `none` | LLM features disabled |
+
+```bash
+export MINK_LLM_MODEL=llama3.1        # default
+export MINK_LLM_BASE_URL=…            # override per provider
+export MINK_LLM_API_KEY=…             # for hosted endpoints
+
+mink summarize <session-id>           # CLI
+```
+
+Or hit **Generate summary** in the UI. `/api/health` reports LLM
+reachability so the UI can reflect it.
 
 Check the engine first if anything fails:
 

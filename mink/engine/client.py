@@ -45,9 +45,12 @@ class EngineClient:
     def health(self) -> bool:
         """Return True if the engine server is reachable."""
         try:
-            resp = httpx.get(f"{self.base_url}/health", timeout=5.0)
-            return resp.status_code < 500
-        except httpx.HTTPError:
+            # trust_env=False: the engine is local, so proxy env vars must
+            # never apply (and must never break URL parsing).
+            with httpx.Client(trust_env=False, timeout=5.0) as client:
+                resp = client.get(f"{self.base_url}/health")
+                return resp.status_code < 500
+        except Exception:  # noqa: BLE001 — any failure means "not reachable"
             return False
 
     def transcribe(
@@ -67,13 +70,15 @@ class EngineClient:
             data["language"] = language
 
         try:
-            with open(audio, "rb") as fh:
+            with (
+                httpx.Client(trust_env=False, timeout=self.timeout) as client,
+                open(audio, "rb") as fh,
+            ):
                 files = {"file": (audio.name, fh, "audio/wav")}
-                resp = httpx.post(
+                resp = client.post(
                     f"{self.base_url}/v1/audio/transcriptions",
                     data=data,
                     files=files,
-                    timeout=self.timeout,
                 )
             resp.raise_for_status()
         except httpx.HTTPError as exc:

@@ -15,7 +15,7 @@ from uuid import uuid4
 
 from mink.capture import AudioRecorder
 from mink.config import settings
-from mink.engine import EngineClient, TranscriptionResult
+from mink.engine import EngineClient, TranscriptionResult, TranscriptionSegment
 
 
 @dataclass
@@ -26,6 +26,12 @@ class LectureSession:
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     audio_path: Path | None = None
     transcript: TranscriptionResult | None = None
+    summary: dict | None = None
+    """Structured summary dict (see mink.llm.Summary.to_dict()); None if not generated."""
+
+    def set_summary(self, summary) -> None:
+        """Attach a summary (mink.llm.Summary or plain dict)."""
+        self.summary = summary.to_dict() if hasattr(summary, "to_dict") else summary
 
     # ------------------------------------------------------------------
     # Recording
@@ -87,5 +93,7 @@ class LectureSession:
         data["created_at"] = datetime.fromisoformat(data["created_at"])
         data["audio_path"] = Path(data["audio_path"]) if data["audio_path"] else None
         if data["transcript"]:
-            data["transcript"] = TranscriptionResult(**data["transcript"])
+            t = data["transcript"]
+            t["segments"] = [TranscriptionSegment(**s) for s in t.get("segments", [])]
+            data["transcript"] = TranscriptionResult(**t)
         return cls(**data)

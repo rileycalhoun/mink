@@ -29,6 +29,21 @@ class Settings(BaseSettings):
     web_host: str = Field(default="127.0.0.1")
     web_port: int = Field(default=8473)
 
+    # --- LLM (summaries and future LLM features) ---
+    # Provider: "ollama" (local default), "openai" (any OpenAI-compatible
+    # endpoint), or "none" (LLM features disabled).
+    llm_provider: str = Field(default="ollama")
+    llm_model: str = Field(default="llama3.1")
+    llm_base_url: str | None = Field(default=None)
+    llm_api_key: str | None = Field(default=None)
+
+    # --- Live transcription ---
+    live_model: str = Field(default="parakeet-ctc-1.1b")
+    live_window_seconds: float = Field(default=12.0)
+    live_overlap_seconds: float = Field(default=3.0)
+    # Chunks quieter than this RMS are skipped (saves engine calls).
+    live_silence_rms: float = Field(default=120.0)
+
     @property
     def sessions_dir(self) -> Path:
         return self.data_dir / "sessions"

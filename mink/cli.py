@@ -134,6 +134,51 @@ def show(session_id: str = typer.Argument(..., help="Session ID")) -> None:
 
 
 @app.command()
+def summarize(session_id: str = typer.Argument(..., help="Session ID")) -> None:
+    """Generate a structured summary (TL;DR, chapters, key points) via the LLM."""
+    from mink.llm import get_provider, summarize_session
+    from mink.llm.providers import LLMNotConfigured
+
+    session = LectureSession.load(session_id)
+    try:
+        provider = get_provider()
+    except LLMNotConfigured as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    with console.status("Summarizing..."):
+        summary = summarize_session(session, provider)
+    session.set_summary(summary)
+    session.save()
+    console.print(f"[green]Done.[/green] {summary.tldr}")
+
+
+@app.command()
+def export(
+    session_id: str = typer.Argument(..., help="Session ID"),
+    format: str = typer.Option("md", help="One of: md, txt, srt, vtt"),
+    output: Path | None = typer.Option(None, help="Output file (default: stdout)"),
+) -> None:
+    """Export a session's transcript (md/txt/srt/vtt)."""
+    from mink.pipeline import EXPORTERS
+
+    try:
+        _, exporter = EXPORTERS[format]
+    except KeyError:
+        console.print(f"[red]Unknown format {format!r}; choose from {', '.join(EXPORTERS)}[/red]")
+        raise typer.Exit(1) from None
+    session = LectureSession.load(session_id)
+    if session.transcript is None:
+        console.print("No transcript to export.")
+        raise typer.Exit(1)
+    body = exporter(session)
+    if output:
+        output.write_text(body)
+        console.print(f"Wrote {output}")
+    else:
+        console.print(body)
+
+
+@app.command()
 def serve(
     host: str = typer.Option(None, help="Bind host"),
     port: int = typer.Option(None, help="Bind port"),
