@@ -71,6 +71,8 @@ export PATH="$HOME/.local/bin:$PATH"
 echo "[mink] pulling models"
 nemo-speech pull parakeet-tdt
 nemo-speech pull sortformer
+echo "[mink] GPU check"
+(nvidia-smi || echo "[mink] WARNING: nvidia-smi unavailable - GPU may not be visible")
 echo "[mink] starting engine on :8000"
 exec nemo-speech serve \
   --asr-model parakeet-tdt \
