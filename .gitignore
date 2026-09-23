@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+.env
+
+# Mink runtime data
+data/
+models/
+*.wav
+*.mp3
+*.m4a
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
