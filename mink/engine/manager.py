@@ -39,6 +39,13 @@ _IDLE_CHECK_S = 30
 # Boot-log tail served to the UI while provisioning.
 _BOOT_LOG_LINES = 80
 _BOOT_LOG_MAX_CHARS = 16_384
+# Cloudflare sits in front of *.proxy.runpod.net and 403s requests with a
+# non-browser User-Agent. Identify as a browser (same string the RunPod
+# API client uses in mink/cloud/runpod.py).
+_USER_AGENT = (
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/126.0 Safari/537.36"
+)
 
 # Slim CUDA runtime image: the nemo-speech.cpp prebuilt CUDA archive bundles
 # the user-space CUDA libs it needs, so no PyTorch image is required.
@@ -404,7 +411,10 @@ class EngineManager:
                 "/v1/audio/transcriptions",
                 data={"model": "parakeet-tdt", "response_format": "verbose_json"},
                 files={"file": ("probe.wav", wav, "audio/wav")},
-                headers={"Authorization": f"Bearer {api_key}"},
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "User-Agent": _USER_AGENT,
+                },
                 timeout=60.0,
                 trust_env=False,
             )

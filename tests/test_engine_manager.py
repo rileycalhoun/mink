@@ -300,7 +300,8 @@ def test_client_sends_bearer_and_manager_url(monkeypatch):
 
     with tempfile.NamedTemporaryFile(suffix=".wav") as tmp:
         client.transcribe(Path(tmp.name))
-    assert calls["headers"] == {"Authorization": "Bearer secret-token"}
+    assert calls["headers"]["Authorization"].startswith("Bearer ")
+    assert calls["headers"]["User-Agent"] == client_mod._USER_AGENT
     assert calls["url"].endswith("/v1/audio/transcriptions")
     assert calls["touched"]
 
@@ -319,8 +320,11 @@ def test_client_no_auth_header_without_key(monkeypatch):
 
     from mink.engine.client import EngineClient
 
-    assert EngineClient()._headers() == {}
-    assert EngineClient(api_key="k")._headers() == {"Authorization": "Bearer k"}
+    assert EngineClient()._headers() == {"User-Agent": client_mod._USER_AGENT}
+    assert EngineClient(api_key="k")._headers() == {
+        "Authorization": "Bearer k",
+        "User-Agent": client_mod._USER_AGENT,
+    }
 
 
 def test_idle_worker_thread_count_stays_bounded(manager, monkeypatch):

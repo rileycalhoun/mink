@@ -27,6 +27,14 @@ from mink.engine.manager import engine_manager
 _RETRY_ATTEMPTS = 3
 _RETRY_BACKOFF_S = 5.0
 
+# Cloudflare sits in front of *.proxy.runpod.net and 403s requests with a
+# non-browser User-Agent. Identify as a browser (same string the RunPod
+# API client uses in mink/cloud/runpod.py).
+_USER_AGENT = (
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/126.0 Safari/537.36"
+)
+
 # Segment grouping: a new segment starts on a speaker change, at a sentence
 # boundary after at least this many words, or unconditionally at the cap so
 # long monologues stay navigable.
@@ -154,9 +162,10 @@ class EngineClient:
         self.timeout = timeout
 
     def _headers(self) -> dict[str, str]:
+        headers = {"User-Agent": _USER_AGENT}
         if self.api_key:
-            return {"Authorization": f"Bearer {self.api_key}"}
-        return {}
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        return headers
 
     def health(self) -> bool:
         """Return True if the engine server is reachable."""
