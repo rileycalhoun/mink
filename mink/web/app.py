@@ -56,12 +56,19 @@ def _load_session_or_404(session_id: str) -> LectureSession:
 def _ensure_wav(src: Path) -> Path:
     """Convert uploads to 16 kHz mono WAV when they aren't already WAV.
 
-    Falls back to the original file if ffmpeg is unavailable.
+    Raises a clear 422 instead of passing an unsupported container to the
+    engine (which would fail with a cryptic 500) when ffmpeg is unavailable.
     """
     if src.suffix.lower() == ".wav":
         return src
     if shutil.which("ffmpeg") is None:
-        return src
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Cannot process {src.suffix or 'this'} audio: ffmpeg is not "
+                "installed on the server. Convert to 16 kHz mono WAV first."
+            ),
+        )
     out = src.with_suffix(".wav")
     subprocess.run(
         [
