@@ -45,7 +45,8 @@ class FakeRunPod:
         gid = (body.get("gpu") or {}).get("id")
         self.attempted_gpu_ids.append(gid)
         if self.fail_create or gid in self.fail_gpu_ids:
-            raise RunPodError("no capacity")
+            # Placement failure, as RunPod reports it.
+            raise RunPodError("no capacity", status_code=400)
         return {"id": "pod123"}
 
     def get_pod(self, pod_id):
@@ -200,6 +201,41 @@ def test_cheapest_gpu_picks_lowest_available(monkeypatch):
     }
     monkeypatch.setattr(client, "_request", lambda *a, **k: catalog)
     assert client.cheapest_gpu() == ("C", 0.16)
+
+
+def test_ranked_gpus_puts_unavailable_last(monkeypatch):
+    from mink.cloud.runpod import RunPodClient
+
+    client = RunPodClient("key")
+    catalog = {
+        "gpus": [
+            {"id": "A", "availability": "NONE", "price": {"community": 0.05}},
+            {"id": "B", "availability": "LOW", "price": {"community": 0.22}},
+            {"id": "C", "availability": "HIGH", "price": {"community": 0.16}},
+            {"id": "D", "availability": "LOW", "price": {"community": None}},
+        ]
+    }
+    monkeypatch.setattr(client, "_request", lambda *a, **k: catalog)
+    # C and B have catalog capacity (cheapest first); A is a stale-catalog
+    # fallback; D has no community price and is dropped.
+    assert client.ranked_gpus() == [("C", 0.16), ("B", 0.22), ("A", 0.05)]
+
+
+def test_start_stops_on_non_placement_error(manager, monkeypatch):
+    """A 402 (no funds) must not be retried across the whole GPU list."""
+
+    class BrokeRunPod(FakeRunPod):
+        def ranked_gpus(self):
+            return [("GPU1", 0.1), ("GPU2", 0.2)]
+
+        def create_pod(self, body):
+            raise RunPodError("balance too low", status_code=402)
+
+    fake = BrokeRunPod()
+    monkeypatch.setattr(manager, "_client", lambda: fake)
+    status = manager.start()
+    assert status["state"] == EngineState.ERROR.value
+    assert "balance too low" in status["error"]
 
 
 def test_cheapest_gpu_raises_when_empty(monkeypatch):

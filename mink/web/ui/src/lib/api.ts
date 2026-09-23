@@ -79,7 +79,8 @@ export interface UploadMeta {
 export function uploadAudio(
 	file: File,
 	meta: UploadMeta,
-	onProgress?: (fraction: number) => void
+	onProgress?: (fraction: number) => void,
+	onTranscribing?: () => void
 ): Promise<{ id: string; path: string }> {
 	return new Promise((resolve, reject) => {
 		const xhr = new XMLHttpRequest();
@@ -89,6 +90,9 @@ export function uploadAudio(
 		xhr.upload.onprogress = (e) => {
 			if (e.lengthComputable) onProgress?.(e.loaded / e.total);
 		};
+		// The upload is done; the server is now transcribing (can take minutes
+		// for a full lecture), so switch the UI from progress bar to spinner.
+		xhr.upload.onload = () => onTranscribing?.();
 		xhr.onload = () => {
 			if (xhr.status >= 200 && xhr.status < 300) {
 				resolve(xhr.response as { id: string; path: string });

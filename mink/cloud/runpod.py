@@ -24,6 +24,10 @@ _USER_AGENT = (
 class RunPodError(RuntimeError):
     """A RunPod API call failed."""
 
+    def __init__(self, message: str, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
 
 class RunPodClient:
     """Thin wrapper over the RunPod v2 REST API."""
@@ -55,7 +59,10 @@ class RunPodClient:
                 parsed = resp.json()
                 if isinstance(parsed, dict) and parsed.get("detail"):
                     detail = str(parsed["detail"])
-            raise RunPodError(f"RunPod {method} {path}: HTTP {resp.status_code}: {detail}")
+            raise RunPodError(
+                f"RunPod {method} {path}: HTTP {resp.status_code}: {detail}",
+                status_code=resp.status_code,
+            )
         try:
             return resp.json()
         except Exception:  # noqa: BLE001 — some endpoints return empty bodies
@@ -71,23 +78,34 @@ class RunPodClient:
         return data.get("gpus", [])
 
     def ranked_gpus(self) -> list[tuple[str, float]]:
-        """Return [(gpu_id, $/hr), ...] sorted cheapest-first for GPUs with
-        current capacity. Raises RunPodError when nothing is available.
+        """Return [(gpu_id, $/hr), ...] sorted cheapest-first.
+
+        GPUs the catalog flags as having capacity come first; GPUs flagged
+        NONE (or unflagged) follow as a fallback, because catalog capacity is
+        often stale and placement is the real test. Raises RunPodError when
+        the catalog has no community GPUs at all.
         """
-        candidates: list[tuple[float, str]] = []
+        with_capacity: list[tuple[float, str]] = []
+        fallback: list[tuple[float, str]] = []
         for gpu in self.list_gpus():
             price = (gpu.get("price") or {}).get("community")
             if not isinstance(price, (int, float)):
                 continue
-            if gpu.get("availability") in (None, "NONE"):
-                continue
             gid = gpu.get("id") or gpu.get("name")
-            if gid:
-                candidates.append((float(price), gid))
-        if not candidates:
+            if not gid:
+                continue
+            bucket = (
+                with_capacity
+                if gpu.get("availability") not in (None, "NONE")
+                else fallback
+            )
+            bucket.append((float(price), gid))
+        with_capacity.sort()
+        fallback.sort()
+        ranked = with_capacity + fallback
+        if not ranked:
             raise RunPodError("No GPUs with capacity in the RunPod catalog right now")
-        candidates.sort()
-        return [(gid, price) for price, gid in candidates]
+        return [(gid, price) for price, gid in ranked]
 
     def cheapest_gpu(self) -> tuple[str, float]:
         """Return (gpu_id, $/hr) of the cheapest GPU with current capacity.

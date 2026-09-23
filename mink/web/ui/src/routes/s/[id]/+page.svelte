@@ -5,24 +5,42 @@
 	import ExportMenu from '$lib/ui/ExportMenu.svelte';
 	import SummaryPanel from '$lib/ui/SummaryPanel.svelte';
 	import TranscriptView from '$lib/ui/TranscriptView.svelte';
-	import { audioUrl } from '$lib/api';
+	import { audioUrl, getSession } from '$lib/api';
 	import { formatDate } from '$lib/format';
-	import type { Summary } from '$lib/types';
+	import type { SessionDetail, Summary } from '$lib/types';
 
 	let { data } = $props();
 
 	// The summary is the only piece of page data the user can change in place
 	// (generation reports back through onsummary); everything else reads from props.
 	let generated = $state<Summary | null>(null);
+	let liveSession = $state<SessionDetail | null>(null);
 	const summary = $derived(generated ?? (data.session.summary as Summary | null));
 	let seekTo = $state<number | null>(null);
 	let currentTime = $state(0);
 
-	const session = $derived(data.session);
+	const session = $derived(liveSession ?? data.session);
 	const hasAudio = $derived(!!session.audio_path);
 	const llmConfigured = $derived(
 		!!data.health && !!data.health.llm.provider && data.health.llm.provider !== 'none'
 	);
+	// A session can land here before its transcript exists (live session still
+	// finalizing, or transcription running server-side). Poll until it arrives.
+	const awaitingTranscript = $derived(!session.transcript);
+
+	$effect(() => {
+		if (!awaitingTranscript) return;
+		const id = data.session.id;
+		const t = setInterval(async () => {
+			try {
+				const fresh = await getSession(id);
+				if (fresh.transcript) liveSession = fresh;
+			} catch {
+				// Keep polling; the next tick retries.
+			}
+		}, 3000);
+		return () => clearInterval(t);
+	});
 
 	function seek(t: number) {
 		seekTo = t;
@@ -78,9 +96,9 @@
 		</div>
 	{:else}
 		<div class="empty card">
-			<Icon name="fileText" size={36} />
-			<p><strong>No transcript yet</strong></p>
-			<p class="muted">This session has no transcript. Transcription may still be running.</p>
+			<span class="spinner spinner-lg" role="status" aria-label="Transcription in progress"></span>
+			<p><strong>Transcribing…</strong></p>
+			<p class="muted">Your transcript is on its way. This page will update automatically.</p>
 		</div>
 	{/if}
 </div>

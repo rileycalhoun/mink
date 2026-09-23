@@ -178,8 +178,14 @@ class EngineManager:
                         raise RunPodError(f"Pod creation returned no id: {pod}")
                     gpu_id, price = gid, price
                     break
-                except Exception as exc:  # noqa: BLE001 — try the next GPU
-                    last_error = exc
+                except RunPodError as exc:
+                    # HTTP 400 here means RunPod has no placeable instance of
+                    # this GPU despite the catalog; try the next cheapest.
+                    # Anything else (401/402/429/…) is a real problem: stop.
+                    if exc.status_code == 400:
+                        last_error = exc
+                        continue
+                    raise
             if pod_id is None:
                 raise RunPodError(
                     f"No GPU placement available: {last_error}"

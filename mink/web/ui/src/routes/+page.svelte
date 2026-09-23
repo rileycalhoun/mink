@@ -21,6 +21,7 @@
 	let upCourse = $state('');
 	let dragging = $state(false);
 	let uploading = $state(false);
+	let transcribing = $state(false);
 	let progress = $state(0);
 	let uploadError = $state<string | null>(null);
 
@@ -62,13 +63,15 @@
 	async function handleUpload() {
 		if (!file || uploading) return;
 		uploading = true;
+		transcribing = false;
 		uploadError = null;
 		progress = 0;
 		try {
 			const { id } = await uploadAudio(
 				file,
 				{ title: upTitle.trim(), course: upCourse.trim() },
-				(f) => (progress = f)
+				(f) => (progress = f),
+				() => (transcribing = true)
 			);
 			showUpload = false;
 			resetUpload();
@@ -82,6 +85,7 @@
 						: 'Upload failed.';
 		} finally {
 			uploading = false;
+			transcribing = false;
 		}
 	}
 
@@ -90,6 +94,7 @@
 		upTitle = '';
 		upCourse = '';
 		progress = 0;
+		transcribing = false;
 		uploadError = null;
 		dragging = false;
 	}
@@ -242,10 +247,17 @@
 		</div>
 
 		{#if uploading}
-			<div class="progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress * 100)} aria-label="Upload progress">
-				<div class="progress-fill" style:width={`${progress * 100}%`}></div>
-			</div>
-			<p class="muted small">Uploading… transcription starts automatically.</p>
+			{#if transcribing}
+				<div class="transcribing" role="status" aria-label="Transcribing">
+					<span class="spinner" aria-hidden="true"></span>
+					<p class="muted small">Transcribing audio… this can take a few minutes for a long lecture.</p>
+				</div>
+			{:else}
+				<div class="progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress * 100)} aria-label="Upload progress">
+					<div class="progress-fill" style:width={`${progress * 100}%`}></div>
+				</div>
+				<p class="muted small">Uploading… transcription starts automatically.</p>
+			{/if}
 		{/if}
 
 		{#if uploadError}
@@ -498,6 +510,17 @@
 		background: var(--accent);
 		border-radius: 999px;
 		transition: width 0.2s ease;
+	}
+
+	.transcribing {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		padding: 0.75rem 0;
+	}
+
+	.transcribing p {
+		margin: 0;
 	}
 
 	.small {
