@@ -57,6 +57,23 @@
 		{#if summary?.model}
 			<span class="badge">{summary.model}</span>
 		{/if}
+		{#if summary?.verdict}
+			{@const v = summary.verdict}
+			<span
+				class="verdict-badge"
+				class:verdict-good={v.faithfulness === 'faithful'}
+				class:verdict-warn={v.faithfulness !== 'faithful'}
+				title={`Jev faithfulness check · model ${v.model} · quality ${v.quality_score.toFixed(1)}/4 · action items P(real) ${v.action_items_probability.toFixed(2)}`}
+			>
+				<Icon name="shield" size={13} />
+				{v.faithfulness === 'faithful'
+					? 'Verified'
+					: v.faithfulness === 'minor_drift'
+						? 'Minor drift'
+						: 'Needs review'}
+				· {(v.faithfulness_confidence * 100).toFixed(0)}%
+			</span>
+		{/if}
 	</div>
 
 	{#if summary}
@@ -190,6 +207,28 @@
 		align-items: center;
 		justify-content: space-between;
 		gap: 0.75rem;
+		flex-wrap: wrap;
+	}
+
+	.verdict-badge {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.35rem;
+		padding: 0.22rem 0.6rem;
+		border-radius: 999px;
+		font-size: 0.75rem;
+		font-weight: 600;
+		letter-spacing: 0.02em;
+		white-space: nowrap;
+		border: 1px solid rgba(34, 197, 94, 0.35);
+		background: var(--accent-dim);
+		color: #86efac;
+	}
+
+	.verdict-badge.verdict-warn {
+		border-color: rgba(251, 191, 36, 0.35);
+		background: rgba(251, 191, 36, 0.08);
+		color: var(--warning);
 	}
 
 	.summary-head h2 {

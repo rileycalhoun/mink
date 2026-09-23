@@ -96,6 +96,36 @@ mink summarize <session-id>           # CLI
 Or hit **Generate summary** in the UI. `/api/health` reports LLM
 reachability so the UI can reflect it.
 
+## Summary verification (Jev)
+
+After a summary is generated, Mink can ask [Jev](https://typesafe.ai)
+(TypeSafe SystemOne) typed questions about it *against the source
+transcript* — one fast parallel pass, no generated prose. This is a
+separate seam from the generative LLM in `mink/llm`: the LLM writes
+summaries, Jev verifies them. The gate asks:
+
+- **faithfulness** (Choice) — every claim grounded in the transcript?
+- **quality** (Score 0–4) — how good a study aid is the summary?
+- **action_items** (Noul) — do the action items correspond to real
+  assignments mentioned in the transcript?
+
+The verdict (`faithful` / `minor_drift` / `unfaithful`, confidence, quality
+score) is stored under `summary["verdict"]` and shown as a badge in the UI.
+If any check looks bad, the verdict recommends a human review.
+
+Opt-in: the gate stays off until you set a TypeSafe key — Mink is fully
+local by default.
+
+```bash
+export MINK_JEV_API_KEY=<your TypeSafe API key>
+
+mink verdict <session-id>            # verify an existing summary
+```
+
+`mink summarize <session-id>` and `POST /api/sessions/{id}/summary` also
+run the gate automatically when a key is configured. `/api/health` reports
+decision-provider reachability under `decision`.
+
 Check the engine first if anything fails:
 
 ```bash

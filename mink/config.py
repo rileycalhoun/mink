@@ -37,6 +37,13 @@ class Settings(BaseSettings):
     llm_base_url: str | None = Field(default=None)
     llm_api_key: str | None = Field(default=None)
 
+    # --- Jev (TypeSafe SystemOne decisions: summary faithfulness gate) ---
+    # Opt-in: unset (default) keeps Mink fully local; set MINK_JEV_API_KEY
+    # to a TypeSafe API key to enable the post-summary verification gate.
+    jev_api_key: str | None = Field(default=None)
+    jev_model: str = Field(default="jev-latest")
+    jev_base_url: str = Field(default="https://api.typesafe.ai")
+
     # --- Live transcription ---
     live_model: str = Field(default="parakeet-ctc-1.1b")
     live_window_seconds: float = Field(default=12.0)

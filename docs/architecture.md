@@ -86,6 +86,25 @@ Current LLM feature: **summaries** (`mink/llm/summarize.py`) — TL;DR,
 timestamped chapters, key points, action items, glossary. Stored as JSON
 on the session; `mink summarize <id>` or `POST /api/sessions/{id}/summary`.
 
+### 5b. Decisions (`mink/decision`)
+
+Beside the generative LLM seam: typed decision providers evaluate *state*
+against *typed questions* and return probabilistic judgments instead of
+prose. The backend is TypeSafe's Jev (`POST /v1/systemone`, direct HTTP,
+no vendor SDK), configured via `MINK_JEV_API_KEY` (opt-in; default unset
+keeps Mink offline), `MINK_JEV_MODEL` (default `jev-latest`),
+`MINK_JEV_BASE_URL` (default `https://api.typesafe.ai`).
+
+Current decision feature: **summary faithfulness gate**
+(`mink/decision/evaluate.py`) — after a summary is generated, one parallel
+Jev call asks whether every claim is grounded in the transcript (Choice),
+rates study-aid quality (Score 0–4), and checks action items against the
+transcript (Noul). The `SummaryVerdict` is persisted under
+`summary["verdict"]`; `review_recommended` is true when any check looks
+bad. Runs automatically from `mink summarize`, `mink verdict`, and the web
+summary endpoint when a key is configured. Never raises into those flows:
+a failing gate logs a warning and leaves the summary in place.
+
 ### 5. Pipeline (`mink/pipeline`)
 
 `LectureSession` is the unit of work: audio + transcript + optional

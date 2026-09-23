@@ -35,6 +35,18 @@ export interface Summary {
 	terms: TermDef[];
 	model: string;
 	created_at: string;
+	verdict?: SummaryVerdict;
+}
+
+export interface SummaryVerdict {
+	faithfulness: 'faithful' | 'minor_drift' | 'unfaithful';
+	faithfulness_confidence: number;
+	quality_score: number;
+	quality_confidence: number;
+	action_items_probability: number;
+	review_recommended: boolean;
+	model: string;
+	created_at: string;
 }
 
 export interface SessionDetail {
