@@ -337,3 +337,45 @@ def test_idle_worker_thread_count_stays_bounded(manager, monkeypatch):
     manager.stop()
     # At most the provision worker + idle watcher beyond baseline.
     assert threading.active_count() <= before + 2
+
+
+def test_boot_log_empty_when_off(manager):
+    assert manager.boot_log() == {"pod_id": None, "state": "off", "log": ""}
+
+
+def test_boot_log_refresh_caches_tail(manager):
+    class Logs(FakeRunPod):
+        def pod_logs(self, pod_id, timeout=None):
+            return "\n".join(f"line {i}" for i in range(200))
+
+    fake = Logs()
+    manager._refresh_boot_log(fake, "pod123")
+    log = manager.boot_log()["log"]
+    lines = log.splitlines()
+    assert len(lines) == 80
+    assert lines[0] == "line 120"
+    assert lines[-1] == "line 199"
+
+
+def test_boot_log_refresh_tolerates_failure(manager):
+    class Broken(FakeRunPod):
+        def pod_logs(self, pod_id, timeout=None):
+            raise RunPodError("boom", status_code=500)
+
+    manager._refresh_boot_log(Broken(), "pod123")  # must not raise
+    assert manager.boot_log()["log"] == ""
+    manager._refresh_boot_log(Broken(), None)  # no pod id: no-op
+    assert manager.boot_log()["log"] == ""
+
+
+def test_start_clears_boot_log(manager, monkeypatch):
+    fake = FakeRunPod()
+    monkeypatch.setattr(manager, "_client", lambda: fake)
+    _healthy(monkeypatch)
+    manager._boot_log = "stale"
+    manager.start()
+    assert _wait_for(manager, EngineState.READY)
+    # The provision worker refreshes from the (fake) pod logs.
+    assert manager.boot_log()["log"] != "stale"
+    manager.stop()
+    assert manager.boot_log() == {"pod_id": None, "state": "off", "log": ""}

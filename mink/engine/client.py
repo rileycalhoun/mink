@@ -1,17 +1,22 @@
 """HTTP client for the nemo-speech.cpp transcription server.
 
 The server exposes an OpenAI-compatible API, so transcription is a plain
-``POST /v1/audio/transcriptions`` multipart request. Diarization is enabled
-server-side with the Sortformer companion model; when active, segments carry
-speaker labels.
+``POST /v1/audio/transcriptions`` multipart request. Diarization is requested
+per-call; when the server was started with a diarizer companion model
+(``--diar-model sortformer`` in scripts/setup-engine.sh), words carry speaker
+labels.
+
+Note on response shape: ``verbose_json`` returns word-level timings
+(``words[]`` with ``word``/``start``/``end``/``confidence``/``speaker``) and
+no ``segments`` array, so Mink groups words into readable timestamped
+segments itself (see :func:`_segments_from_words`).
 """
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
-
-import time
 
 import httpx
 
@@ -20,6 +25,65 @@ from mink.engine.manager import engine_manager
 
 _RETRY_ATTEMPTS = 3
 _RETRY_BACKOFF_S = 5.0
+
+# Segment grouping: a new segment starts on a speaker change, at a sentence
+# boundary after at least this many words, or unconditionally at the cap so
+# long monologues stay navigable.
+_MIN_WORDS_PER_SEGMENT = 6
+_MAX_WORDS_PER_SEGMENT = 24
+_SENTENCE_END = (".", "!", "?")
+
+
+def _segments_from_words(words: list[dict]) -> list[TranscriptionSegment]:
+    """Group verbose_json word timings into readable timestamped segments.
+
+    nemo-speech.cpp's ``verbose_json`` has no ``segments`` array — only
+    ``words[]`` — so the grouping is Mink's own: speaker changes always break,
+    sentence-ending punctuation breaks after a minimum run of words, and a
+    hard cap keeps very long runs navigable.
+    """
+    segments: list[TranscriptionSegment] = []
+    cur: list[str] = []
+    cur_start = 0.0
+    cur_end = 0.0
+    cur_speaker: str | None = None
+
+    def flush() -> None:
+        nonlocal cur, cur_start, cur_end, cur_speaker
+        text = " ".join(cur).strip()
+        if text:
+            segments.append(
+                TranscriptionSegment(
+                    start=cur_start,
+                    end=cur_end,
+                    text=text,
+                    speaker=cur_speaker,
+                )
+            )
+        cur = []
+        cur_speaker = None
+
+    for w in words:
+        word = str(w.get("word") or w.get("text") or "").strip()
+        if not word:
+            continue
+        speaker = w.get("speaker")
+        start = float(w.get("start", cur_end or 0.0))
+        end = float(w.get("end", start))
+        if cur and speaker != cur_speaker:
+            flush()
+        if not cur:
+            cur_start = start
+            cur_speaker = speaker
+        cur.append(word)
+        cur_end = end
+        sentence_end = word[-1] in _SENTENCE_END
+        if len(cur) >= _MAX_WORDS_PER_SEGMENT or (
+            sentence_end and len(cur) >= _MIN_WORDS_PER_SEGMENT
+        ):
+            flush()
+    flush()
+    return segments
 
 
 @dataclass
@@ -90,6 +154,10 @@ class EngineClient:
         }
         if language:
             data["language"] = language
+        if diarize:
+            # Off by default server-side; without it words carry no speakers
+            # even when a diarizer model is loaded.
+            data["diarization"] = "true"
 
         try:
             for attempt in range(_RETRY_ATTEMPTS):
@@ -122,15 +190,8 @@ class EngineClient:
             ) from exc
 
         payload = resp.json()
-        segments = [
-            TranscriptionSegment(
-                start=float(s.get("start", 0.0)),
-                end=float(s.get("end", 0.0)),
-                text=s.get("text", "").strip(),
-                speaker=s.get("speaker"),
-            )
-            for s in payload.get("segments", [])
-        ]
+        # verbose_json carries words[], not segments — group them ourselves.
+        segments = _segments_from_words(payload.get("words") or [])
         return TranscriptionResult(
             text=payload.get("text", ""),
             language=payload.get("language"),

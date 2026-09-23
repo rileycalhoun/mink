@@ -48,9 +48,14 @@ class RunPodClient:
     # low level
     # ------------------------------------------------------------------
 
-    def _request(self, method: str, path: str, body: dict | None = None) -> dict:
+    def _request(
+        self, method: str, path: str, body: dict | None = None, timeout: float | None = None
+    ) -> dict:
         try:
-            resp = self._client.request(method, path, json=body)
+            kwargs: dict = {}
+            if timeout is not None:
+                kwargs["timeout"] = timeout
+            resp = self._client.request(method, path, json=body, **kwargs)
         except httpx.HTTPError as exc:
             raise RunPodError(f"RunPod request failed: {exc}") from exc
         if resp.status_code >= 400:
@@ -132,7 +137,9 @@ class RunPodClient:
     def terminate_pod(self, pod_id: str) -> None:
         self._request("DELETE", f"/v2/pods/{pod_id}")
 
-    def pod_logs(self, pod_id: str) -> str:
-        data = self._request("GET", f"/v2/pods/{pod_id}/logs")
+    def pod_logs(self, pod_id: str, timeout: float | None = None) -> str:
+        data = self._request("GET", f"/v2/pods/{pod_id}/logs", timeout=timeout)
         logs = data.get("logs") or data.get("data") or ""
+        if isinstance(logs, list):
+            return "\n".join(str(x) for x in logs)
         return logs if isinstance(logs, str) else str(logs)

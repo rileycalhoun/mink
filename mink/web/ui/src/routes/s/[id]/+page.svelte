@@ -80,6 +80,7 @@
 				<h2 class="col-title"><Icon name="fileText" size={18} /> Transcript</h2>
 				<TranscriptView
 					segments={session.transcript.segments}
+					text={session.transcript.text}
 					{currentTime}
 					onseek={hasAudio ? seek : undefined}
 				/>

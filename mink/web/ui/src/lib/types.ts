@@ -98,3 +98,10 @@ export interface EngineStatus {
 	idle_timeout_s: number;
 	error: string | null;
 }
+
+/** Cached tail of the provisioning pod's boot log. */
+export interface EngineLog {
+	pod_id: string | null;
+	state: EngineStatus['state'];
+	log: string;
+}

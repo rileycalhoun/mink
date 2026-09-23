@@ -36,6 +36,9 @@ _POD_POLL_S = 10
 _HEALTH_POLL_S = 10
 _START_TIMEOUT_S = 15 * 60
 _IDLE_CHECK_S = 30
+# Boot-log tail served to the UI while provisioning.
+_BOOT_LOG_LINES = 80
+_BOOT_LOG_MAX_CHARS = 16_384
 
 # Slim CUDA runtime image: the nemo-speech.cpp prebuilt CUDA archive bundles
 # the user-space CUDA libs it needs, so no PyTorch image is required.
@@ -87,6 +90,9 @@ class EngineManager:
         self._last_used: float | None = None
         self._worker: threading.Thread | None = None
         self._idle_thread: threading.Thread | None = None
+        # Latest tail of the pod's boot log, refreshed by the provision
+        # worker while the pod is warming up; surfaced via /api/engine/logs.
+        self._boot_log = ""
 
     # ------------------------------------------------------------------
     # properties
@@ -135,6 +141,32 @@ class EngineManager:
                 "error": self._error,
             }
 
+    def boot_log(self) -> dict:
+        """Latest cached tail of the pod's boot log (provisioning only)."""
+        with self._lock:
+            return {
+                "pod_id": self._pod_id,
+                "state": self._state.value,
+                "log": self._boot_log,
+            }
+
+    def _refresh_boot_log(self, client: RunPodClient, pod_id: str | None) -> None:
+        """Best-effort refresh of the cached boot-log tail.
+
+        Runs on the provision worker thread; never raises, never blocks long.
+        """
+        if not pod_id:
+            return
+        try:
+            raw = client.pod_logs(pod_id, timeout=10.0)
+        except Exception:  # noqa: BLE001 — stale log beats a failed fetch
+            return
+        tail = "\n".join(raw.splitlines()[-_BOOT_LOG_LINES:])
+        if len(tail) > _BOOT_LOG_MAX_CHARS:
+            tail = tail[-_BOOT_LOG_MAX_CHARS:]
+        with self._lock:
+            self._boot_log = tail
+
     # ------------------------------------------------------------------
     # lifecycle
     # ------------------------------------------------------------------
@@ -154,12 +186,13 @@ class EngineManager:
                 return self.status()
             self._error = None
             self._state = EngineState.PROVISIONING
+            self._boot_log = ""
 
         try:
             client = self._client()
             pod_id = gpu_id = price = None
             last_error: Exception | None = None
-            for gid, price in client.ranked_gpus():
+            for gid, gpu_price in client.ranked_gpus():
                 api_key = secrets.token_urlsafe(32)
                 body = {
                     "name": POD_NAME,
@@ -176,7 +209,7 @@ class EngineManager:
                     pod_id = pod.get("id")
                     if not pod_id:
                         raise RunPodError(f"Pod creation returned no id: {pod}")
-                    gpu_id, price = gid, price
+                    gpu_id, price = gid, gpu_price
                     break
                 except RunPodError as exc:
                     # HTTP 400 here means RunPod has no placeable instance of
@@ -222,6 +255,7 @@ class EngineManager:
             self._last_used = None
             self._state = EngineState.OFF
             self._error = None
+            self._boot_log = ""
         self._clear_key()
         if pod_id and self.configured:
             try:
@@ -309,6 +343,7 @@ class EngineManager:
                     pod_id = self._pod_id
                     if self._state is not EngineState.PROVISIONING:
                         return
+                self._refresh_boot_log(client, pod_id)
                 pod = client.get_pod(pod_id or "")
                 if pod.get("status") == "RUNNING":
                     break
@@ -317,7 +352,7 @@ class EngineManager:
                 time.sleep(_POD_POLL_S)
             else:
                 raise RunPodError("Timed out waiting for the pod to start")
-            self._wait_healthy(deadline)
+            self._wait_healthy(deadline, client)
             with self._lock:
                 self._state = EngineState.READY
                 self._last_used = time.time()
@@ -330,7 +365,7 @@ class EngineManager:
     def _health_worker(self) -> None:
         """Adopted pod: just verify the engine is healthy."""
         try:
-            self._wait_healthy(time.time() + _START_TIMEOUT_S)
+            self._wait_healthy(time.time() + _START_TIMEOUT_S, self._client())
             with self._lock:
                 self._state = EngineState.READY
                 self._last_used = time.time()
@@ -340,13 +375,14 @@ class EngineManager:
                     self._state = EngineState.ERROR
                     self._error = str(exc)
 
-    def _wait_healthy(self, deadline: float) -> None:
+    def _wait_healthy(self, deadline: float, client: RunPodClient) -> None:
         while time.time() < deadline:
             with self._lock:
                 pod_id = self._pod_id
                 api_key = self._api_key
                 if self._state is not EngineState.PROVISIONING:
                     raise RunPodError("Startup cancelled")
+            self._refresh_boot_log(client, pod_id)
             if self._probe_engine(pod_id, api_key):
                 return
             time.sleep(_HEALTH_POLL_S)

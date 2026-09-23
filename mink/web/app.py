@@ -149,6 +149,12 @@ def engine_stop() -> JSONResponse:
     return JSONResponse(engine_manager.stop())
 
 
+@app.get("/api/engine/logs")
+def engine_logs() -> dict:
+    """Cached tail of the provisioning pod's boot log (empty when off)."""
+    return engine_manager.boot_log()
+
+
 @app.post("/api/transcribe")
 def transcribe_upload(
     file: UploadFile = File(...),

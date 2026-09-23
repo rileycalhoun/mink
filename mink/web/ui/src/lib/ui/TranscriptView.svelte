@@ -6,13 +6,17 @@
 	/**
 	 * Clickable, timestamped transcript. The active segment (by `currentTime`)
 	 * is highlighted; clicking a segment seeks the audio via `onseek`.
+	 * When no segments exist (e.g. an older session saved before segments
+	 * were derived), falls back to rendering the plain transcript text.
 	 */
 	let {
 		segments,
+		text = '',
 		currentTime = 0,
 		onseek
 	}: {
 		segments: Segment[];
+		text?: string;
 		currentTime?: number;
 		onseek?: (time: number) => void;
 	} = $props();
@@ -53,6 +57,9 @@
 </script>
 
 <div class="transcript scroll-thin" role="log" aria-label="Transcript">
+	{#if groups.length === 0}
+		<p class="plain-text">{text}</p>
+	{:else}
 	{#each groups as group (group.key)}
 		{@const color = speakerColor(group.speaker)}
 		<div class="group" class:active={group.key === activeKey}>
@@ -74,7 +81,8 @@
 				{/each}
 			</div>
 		</div>
-	{/each}
+		{/each}
+	{/if}
 </div>
 
 <style>
@@ -168,5 +176,11 @@
 
 	.line-text {
 		line-height: 1.6;
+	}
+
+	.plain-text {
+		line-height: 1.65;
+		font-size: 0.98rem;
+		white-space: pre-wrap;
 	}
 </style>

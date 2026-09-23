@@ -1,6 +1,7 @@
 /** Typed fetch wrappers for the Mink FastAPI backend (same origin). */
 
 import type {
+	EngineLog,
 	EngineStatus,
 	HealthResponse,
 	SearchHit,
@@ -43,6 +44,8 @@ export const startEngine = () =>
 
 export const stopEngine = () =>
 	api<EngineStatus>('/api/engine/stop', { method: 'POST' });
+
+export const getEngineLogs = () => api<EngineLog>('/api/engine/logs');
 
 export const listSessions = () => api<SessionListItem[]>('/api/sessions');
 
