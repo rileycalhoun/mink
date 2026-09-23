@@ -58,7 +58,7 @@ Chunked design over the engine's stateless HTTP API:
 WebSocket protocol:
 
 ```
-C → S {"type": "start", "title"?, "course"?, "model"?}
+C → S {"type": "start", "title"?, "course"?, "teacher"?, "folder_id"?, "model"?}
 S → C {"type": "started", "session_id"}
 C → S <binary PCM16 16kHz mono>
 S → C {"type": "partial", "segments": [{start, end, text}], "text", "duration"}

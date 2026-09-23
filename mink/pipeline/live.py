@@ -62,10 +62,19 @@ class LivePartial:
 class LiveSession:
     """One in-progress live transcription."""
 
-    def __init__(self, title: str = "", course: str = "", model: str | None = None) -> None:
+    def __init__(
+        self,
+        title: str = "",
+        course: str = "",
+        teacher: str = "",
+        folder_id: str | None = None,
+        model: str | None = None,
+    ) -> None:
         self.id = uuid4().hex[:12]
         self.title = title
         self.course = course
+        self.teacher = teacher
+        self.folder_id = folder_id
         self.model = model or settings.live_model
         self.created_at = datetime.now(timezone.utc)
         self._pcm = bytearray()
@@ -141,7 +150,12 @@ class LiveSession:
         audio_path.write_bytes(_pcm_to_wav_bytes(pcm))
 
         session = LectureSession(
-            id=self.id, title=self.title, course=self.course, audio_path=audio_path
+            id=self.id,
+            title=self.title,
+            course=self.course,
+            teacher=self.teacher,
+            folder_id=self.folder_id,
+            audio_path=audio_path,
         )
         # Final pass with the default (higher-quality, punctuated) model + diarization.
         session.transcribe(diarize=True)
@@ -161,8 +175,17 @@ class LiveSessionManager:
         self._sessions: dict[str, LiveSession] = {}
         self._lock = threading.Lock()
 
-    def create(self, title: str = "", course: str = "", model: str | None = None) -> LiveSession:
-        session = LiveSession(title=title, course=course, model=model)
+    def create(
+        self,
+        title: str = "",
+        course: str = "",
+        teacher: str = "",
+        folder_id: str | None = None,
+        model: str | None = None,
+    ) -> LiveSession:
+        session = LiveSession(
+            title=title, course=course, teacher=teacher, folder_id=folder_id, model=model
+        )
         with self._lock:
             self._sessions[session.id] = session
         return session

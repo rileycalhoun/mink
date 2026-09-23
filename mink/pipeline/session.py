@@ -23,6 +23,8 @@ class LectureSession:
     id: str = field(default_factory=lambda: uuid4().hex[:12])
     title: str = ""
     course: str = ""
+    teacher: str = ""
+    folder_id: str | None = None
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     audio_path: Path | None = None
     transcript: TranscriptionResult | None = None
@@ -90,6 +92,9 @@ class LectureSession:
     def load(cls, session_id: str) -> LectureSession:
         path = settings.sessions_dir / f"{session_id}.json"
         data = json.loads(path.read_text())
+        # Tolerate sessions written before teacher/folder_id existed.
+        data.setdefault("teacher", "")
+        data.setdefault("folder_id", None)
         data["created_at"] = datetime.fromisoformat(data["created_at"])
         data["audio_path"] = Path(data["audio_path"]) if data["audio_path"] else None
         if data["transcript"]:

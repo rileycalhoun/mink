@@ -17,6 +17,7 @@ from tempfile import NamedTemporaryFile
 from fastapi import FastAPI, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from mink import __version__
@@ -25,9 +26,11 @@ from mink.engine import EngineClient, engine_manager
 from mink.llm import get_provider, provider_status, summarize_session
 from mink.llm.providers import LLMNotConfigured
 from mink.pipeline import EXPORTERS, LectureSession, LiveSessionManager, SessionStore
+from mink.pipeline.folders import FolderStore
 
 app = FastAPI(title="Mink", version=__version__)
 store = SessionStore()
+folders = FolderStore()
 live_manager = LiveSessionManager()
 
 
@@ -104,6 +107,8 @@ def list_sessions() -> list[dict]:
             "id": s.id,
             "title": s.title,
             "course": s.course,
+            "teacher": s.teacher,
+            "folder_id": s.folder_id,
             "created_at": s.created_at.isoformat(),
             "has_transcript": s.transcript is not None,
             "has_summary": s.summary is not None,
@@ -116,6 +121,70 @@ def list_sessions() -> list[dict]:
 @app.get("/api/sessions/{session_id}")
 def get_session(session_id: str) -> dict:
     return _load_session_or_404(session_id).to_dict()
+
+
+class SessionPatch(BaseModel):
+    title: str | None = None
+    course: str | None = None
+    teacher: str | None = None
+    folder_id: str | None = None
+
+
+@app.patch("/api/sessions/{session_id}")
+def patch_session(session_id: str, patch: SessionPatch) -> dict:
+    """Update session metadata (title, course, teacher, folder)."""
+    if patch.folder_id is not None and folders.get(patch.folder_id) is None:
+        raise HTTPException(status_code=422, detail="Unknown folder")
+    session = store.update(
+        session_id,
+        **{k: v for k, v in patch.model_dump().items() if v is not None},
+    )
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return session.to_dict()
+
+
+# ---------------------------------------------------------------------------
+# Folders
+class FolderCreate(BaseModel):
+    name: str
+
+
+class FolderRename(BaseModel):
+    name: str
+
+
+@app.get("/api/folders")
+def list_folders() -> list[dict]:
+    return [f.to_dict() for f in folders.list()]
+
+
+@app.post("/api/folders", status_code=201)
+def create_folder(body: FolderCreate) -> dict:
+    try:
+        return folders.create(body.name).to_dict()
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.patch("/api/folders/{folder_id}")
+def rename_folder(folder_id: str, body: FolderRename) -> dict:
+    try:
+        folder = folders.rename(folder_id, body.name)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if folder is None:
+        raise HTTPException(status_code=404, detail="Folder not found")
+    return folder.to_dict()
+
+
+@app.delete("/api/folders/{folder_id}", status_code=204)
+def delete_folder(folder_id: str) -> Response:
+    """Delete a folder; its sessions become unfiled (never deleted)."""
+    if not folders.delete(folder_id):
+        raise HTTPException(status_code=404, detail="Folder not found")
+    store.clear_folder(folder_id)
+    return Response(status_code=204)
 
 
 @app.delete("/api/sessions/{session_id}", status_code=204)
@@ -170,15 +239,24 @@ def transcribe_upload(
     language: str | None = None,
     title: str = "",
     course: str = "",
+    teacher: str = "",
+    folder_id: str | None = None,
 ) -> JSONResponse:
     """Upload an audio file, transcribe it, and save as a new session."""
+    if folder_id is not None and folders.get(folder_id) is None:
+        raise HTTPException(status_code=422, detail="Unknown folder")
     suffix = Path(file.filename or "upload").suffix or ".wav"
     with NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         tmp.write(file.file.read())
         tmp_path = Path(tmp.name)
 
     wav_path = _ensure_wav(tmp_path)
-    session = LectureSession(title=title or file.filename or "", course=course)
+    session = LectureSession(
+        title=title or file.filename or "",
+        course=course,
+        teacher=teacher,
+        folder_id=folder_id,
+    )
     session.audio_path = wav_path
     try:
         session.transcribe(model=model, language=language)
@@ -267,7 +345,7 @@ async def live_ws(websocket: WebSocket) -> None:
     """Live transcription protocol (see docs/architecture.md).
 
     Client → server (text JSON):
-      {"type": "start", "title": ?, "course": ?, "model": ?}
+      {"type": "start", "title": ?, "course": ?, "teacher": ?, "folder_id": ?, "model": ?}
       {"type": "stop"}
     Client → server (binary): 16-bit PCM mono @ 16 kHz chunks.
     Server → client (text JSON):
@@ -287,6 +365,8 @@ async def live_ws(websocket: WebSocket) -> None:
                     session = live_manager.create(
                         title=data.get("title", ""),
                         course=data.get("course", ""),
+                        teacher=data.get("teacher", ""),
+                        folder_id=data.get("folder_id"),
                         model=data.get("model"),
                     )
                     await websocket.send_json({"type": "started", "session_id": session.id})

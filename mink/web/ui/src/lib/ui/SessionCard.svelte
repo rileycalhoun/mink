@@ -10,9 +10,14 @@
 <div class="card-wrap" class:deletable={!!ondelete}>
 	<a class="session-card card" href={resolve(`/s/${session.id}`)}>
 		<div class="card-top">
-			{#if session.course}
-				<span class="chip">{session.course}</span>
-			{/if}
+			<div class="chips">
+				{#if session.course}
+					<span class="chip">{session.course}</span>
+				{/if}
+				{#if session.teacher}
+					<span class="chip chip-teacher">{session.teacher}</span>
+				{/if}
+			</div>
 			<span class="date muted">{formatDate(session.created_at)}</span>
 		</div>
 		<h3 class="title">{session.title || 'Untitled lecture'}</h3>
@@ -75,6 +80,16 @@
 		align-items: center;
 		justify-content: space-between;
 		gap: 0.75rem;
+	}
+
+	.chips {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.35rem;
+	}
+
+	.chip-teacher {
+		opacity: 0.75;
 	}
 
 	.deletable .card-top {

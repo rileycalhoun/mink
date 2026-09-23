@@ -3,10 +3,12 @@
 import type {
 	EngineLog,
 	EngineStatus,
+	Folder,
 	HealthResponse,
 	SearchHit,
 	SessionDetail,
 	SessionListItem,
+	SessionMetadataPatch,
 	Summary
 } from './types';
 
@@ -75,6 +77,8 @@ export const exportUrl = (id: string, format: ExportFormat) =>
 export interface UploadMeta {
 	title?: string;
 	course?: string;
+	teacher?: string;
+	folder_id?: string | null;
 	model?: string;
 	language?: string;
 }
@@ -118,8 +122,36 @@ export function uploadAudio(
 		form.append('file', file);
 		if (meta.title) form.append('title', meta.title);
 		if (meta.course) form.append('course', meta.course);
+		if (meta.teacher) form.append('teacher', meta.teacher);
+		if (meta.folder_id) form.append('folder_id', meta.folder_id);
 		if (meta.model) form.append('model', meta.model);
 		if (meta.language) form.append('language', meta.language);
 		xhr.send(form);
 	});
 }
+
+export const updateSession = (id: string, patch: SessionMetadataPatch) =>
+	api<SessionDetail>(`/api/sessions/${encodeURIComponent(id)}`, {
+		method: 'PATCH',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(patch)
+	});
+
+export const listFolders = () => api<Folder[]>('/api/folders');
+
+export const createFolder = (name: string) =>
+	api<Folder>('/api/folders', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ name })
+	});
+
+export const renameFolder = (id: string, name: string) =>
+	api<Folder>(`/api/folders/${encodeURIComponent(id)}`, {
+		method: 'PATCH',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ name })
+	});
+
+export const deleteFolder = (id: string) =>
+	api<void>(`/api/folders/${encodeURIComponent(id)}`, { method: 'DELETE' });

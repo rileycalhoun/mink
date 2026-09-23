@@ -15,6 +15,8 @@ export type LiveStatus = 'idle' | 'connecting' | 'listening' | 'finalizing' | 'e
 export interface LiveStartOptions {
 	title?: string;
 	course?: string;
+	teacher?: string;
+	folder_id?: string | null;
 	model?: string;
 }
 
@@ -72,6 +74,8 @@ export class LiveClient {
 						type: 'start',
 						title: options.title ?? '',
 						course: options.course ?? '',
+						teacher: options.teacher ?? '',
+						folder_id: options.folder_id ?? null,
 						...(options.model ? { model: options.model } : {})
 					})
 				);

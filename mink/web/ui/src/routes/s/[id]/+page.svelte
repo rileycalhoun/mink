@@ -5,11 +5,12 @@
 	import AudioPlayer from '$lib/ui/AudioPlayer.svelte';
 	import ConfirmDialog from '$lib/ui/ConfirmDialog.svelte';
 	import ExportMenu from '$lib/ui/ExportMenu.svelte';
+	import Modal from '$lib/ui/Modal.svelte';
 	import SummaryPanel from '$lib/ui/SummaryPanel.svelte';
 	import TranscriptView from '$lib/ui/TranscriptView.svelte';
-	import { audioUrl, deleteSession, getSession } from '$lib/api';
+	import { audioUrl, createFolder, deleteSession, getSession, listFolders, updateSession } from '$lib/api';
 	import { formatDate } from '$lib/format';
-	import type { SessionDetail, Summary } from '$lib/types';
+	import type { Folder, SessionDetail, Summary } from '$lib/types';
 
 	let { data } = $props();
 
@@ -17,12 +18,69 @@
 	// (generation reports back through onsummary); everything else reads from props.
 	let generated = $state<Summary | null>(null);
 	let liveSession = $state<SessionDetail | null>(null);
+	let editedSession = $state<SessionDetail | null>(null);
 	const summary = $derived(generated ?? (data.session.summary as Summary | null));
 	let seekTo = $state<number | null>(null);
 	let currentTime = $state(0);
 	let confirmDelete = $state(false);
 	let deleting = $state(false);
 	let deleteError = $state<string | null>(null);
+
+	// Editable metadata (title/course/teacher/folder)
+	let folders = $state<Folder[]>([]);
+	let editOpen = $state(false);
+	let editBusy = $state(false);
+	let editError = $state<string | null>(null);
+	let editTitle = $state('');
+	let editCourse = $state('');
+	let editTeacher = $state('');
+	let editFolderId = $state('');
+	let editNewFolder = $state('');
+	let editShowNewFolder = $state(false);
+
+	$effect(() => {
+		listFolders()
+			.then((f) => (folders = f))
+			.catch(() => {});
+	});
+
+	function openEdit() {
+		const s = session;
+		editTitle = s.title;
+		editCourse = s.course;
+		editTeacher = s.teacher;
+		editFolderId = s.folder_id ?? '';
+		editNewFolder = '';
+		editShowNewFolder = false;
+		editError = null;
+		editOpen = true;
+	}
+
+	async function submitEdit() {
+		editBusy = true;
+		editError = null;
+		try {
+			let folderId: string | null = editFolderId || null;
+			if (editShowNewFolder && editNewFolder.trim()) {
+				const folder = await createFolder(editNewFolder.trim());
+				folders = [...folders.filter((f) => f.id !== folder.id), folder].sort((a, b) =>
+					a.name.localeCompare(b.name)
+				);
+				folderId = folder.id;
+			}
+			editedSession = await updateSession(session.id, {
+				title: editTitle.trim(),
+				course: editCourse.trim(),
+				teacher: editTeacher.trim(),
+				folder_id: folderId
+			});
+			editOpen = false;
+		} catch (e) {
+			editError = e instanceof Error ? e.message : 'Could not save changes.';
+		} finally {
+			editBusy = false;
+		}
+	}
 
 	async function handleDelete() {
 		deleting = true;
@@ -38,8 +96,9 @@
 		}
 	}
 
-	const session = $derived(liveSession ?? data.session);
+	const session = $derived(editedSession ?? liveSession ?? data.session);
 	const hasAudio = $derived(!!session.audio_path);
+	const folderName = $derived(folders.find((f) => f.id === session.folder_id)?.name ?? null);
 	const llmConfigured = $derived(
 		!!data.health && !!data.health.llm.provider && data.health.llm.provider !== 'none'
 	);
@@ -80,12 +139,32 @@
 		<div class="title-block">
 			{#if session.course}<span class="chip">{session.course}</span>{/if}
 			<h1>{session.title || 'Untitled lecture'}</h1>
-			<p class="muted">{formatDate(session.created_at)}</p>
+			<dl class="meta">
+				<div>
+					<dt>Recorded</dt>
+					<dd>{formatDate(session.created_at)}</dd>
+				</div>
+				{#if session.teacher}
+					<div>
+						<dt>Teacher</dt>
+						<dd>{session.teacher}</dd>
+					</div>
+				{/if}
+				{#if folderName}
+					<div>
+						<dt>Folder</dt>
+						<dd><Icon name="folder" size={13} /> {folderName}</dd>
+					</div>
+				{/if}
+			</dl>
 		</div>
 		<div class="head-actions">
 			{#if session.transcript}
 				<ExportMenu sessionId={session.id} title={session.title} />
 			{/if}
+			<button class="btn btn-ghost" onclick={openEdit} aria-label="Edit session details">
+				<Icon name="pencil" size={15} /> Edit
+			</button>
 			<button
 				class="btn btn-ghost btn-danger-ghost"
 				onclick={() => {
@@ -143,6 +222,92 @@
 	onconfirm={handleDelete}
 />
 
+<Modal bind:open={editOpen} title="Edit session details">
+	<div class="edit-form">
+		<div class="field">
+			<label for="edit-title">Title</label>
+			<input id="edit-title" class="input" bind:value={editTitle} disabled={editBusy} />
+		</div>
+		<div class="field-row">
+			<div class="field">
+				<label for="edit-course">Course</label>
+				<input
+					id="edit-course"
+					class="input"
+					bind:value={editCourse}
+					placeholder="e.g. Anthropology C1001"
+					disabled={editBusy}
+				/>
+			</div>
+			<div class="field">
+				<label for="edit-teacher">Teacher</label>
+				<input
+					id="edit-teacher"
+					class="input"
+					bind:value={editTeacher}
+					placeholder="e.g. Dr. Alvarez"
+					disabled={editBusy}
+				/>
+			</div>
+		</div>
+		<div class="field">
+			<label for="edit-folder">Folder</label>
+			{#if editShowNewFolder}
+				<div class="folder-new">
+					<input
+						id="edit-folder"
+						class="input"
+						bind:value={editNewFolder}
+						placeholder="New folder name"
+						disabled={editBusy}
+						aria-label="New folder name"
+					/>
+					<button
+						class="btn btn-ghost"
+						disabled={editBusy}
+						onclick={() => {
+							editShowNewFolder = false;
+							editNewFolder = '';
+						}}
+					>
+						Cancel
+					</button>
+				</div>
+			{:else}
+				<select
+					id="edit-folder"
+					class="input"
+					bind:value={editFolderId}
+					disabled={editBusy}
+					onchange={(e) => {
+						if ((e.target as HTMLSelectElement).value === '__new__') {
+							editFolderId = '';
+							editShowNewFolder = true;
+						}
+					}}
+				>
+					<option value="">No folder</option>
+					{#each folders as folder (folder.id)}
+						<option value={folder.id}>{folder.name}</option>
+					{/each}
+					<option value="__new__">+ New folder…</option>
+				</select>
+			{/if}
+		</div>
+		{#if editError}
+			<p class="error-text" role="alert"><Icon name="alert" size={15} /> {editError}</p>
+		{/if}
+		<div class="edit-actions">
+			<button class="btn btn-ghost" onclick={() => (editOpen = false)} disabled={editBusy}>
+				Cancel
+			</button>
+			<button class="btn btn-primary" onclick={submitEdit} disabled={editBusy}>
+				{editBusy ? 'Saving…' : 'Save changes'}
+			</button>
+		</div>
+	</div>
+</Modal>
+
 <style>
 	.detail {
 		display: flex;
@@ -191,6 +356,71 @@
 	.title-block h1 {
 		font-size: 1.8rem;
 		font-weight: 800;
+	}
+
+	.meta {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem 1.75rem;
+		margin: 0;
+	}
+
+	.meta > div {
+		display: flex;
+		align-items: baseline;
+		gap: 0.5rem;
+	}
+
+	.meta dt {
+		font-size: 0.72rem;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+		color: var(--muted-text);
+	}
+
+	.meta dd {
+		margin: 0;
+		font-size: 0.95rem;
+		display: inline-flex;
+		align-items: center;
+		gap: 0.35rem;
+	}
+
+	.edit-form {
+		display: flex;
+		flex-direction: column;
+		gap: 1rem;
+	}
+
+	.field-row {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: 0.75rem;
+	}
+
+	.folder-new {
+		display: flex;
+		gap: 0.5rem;
+	}
+
+	.folder-new .input {
+		flex: 1;
+	}
+
+	.edit-actions {
+		display: flex;
+		justify-content: flex-end;
+		gap: 0.75rem;
+		margin-top: 0.5rem;
+	}
+
+	.error-text {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		color: var(--danger);
+		font-size: 0.9rem;
 	}
 
 	.head-actions {

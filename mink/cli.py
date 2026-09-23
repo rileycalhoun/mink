@@ -12,6 +12,14 @@ from mink import __version__
 from mink.config import settings
 from mink.engine import MODELS, EngineClient, get_model
 from mink.pipeline import LectureSession, SessionStore
+from mink.pipeline.folders import FolderStore
+
+
+def _folder_id(name: str | None) -> str | None:
+    """Resolve a folder name to its id, creating it on first use."""
+    if not name or not name.strip():
+        return None
+    return FolderStore().create(name.strip()).id
 
 app = typer.Typer(help="Mink — open-source lecture recording and transcription.")
 console = Console()
@@ -53,11 +61,15 @@ def engine_status() -> None:
 @app.command()
 def record(
     title: str = typer.Option("", help="Lecture title"),
-    course: str = typer.Option("", help="Course name/code"),
+    course: str = typer.Option("", help="Course name/code, e.g. Anthropology C1001"),
+    teacher: str = typer.Option("", help="Teacher/professor name"),
+    folder: str | None = typer.Option(None, help="Folder name to file under"),
     device: str | None = typer.Option(None, help="Input device index or name"),
 ) -> None:
     """Record a lecture from the microphone (Ctrl-C to stop)."""
-    session = LectureSession(title=title, course=course)
+    session = LectureSession(
+        title=title, course=course, teacher=teacher, folder_id=_folder_id(folder)
+    )
     session.record(device=device)
     path = session.save()
     console.print(f"Session {session.id} saved to {path}")
@@ -70,12 +82,19 @@ def transcribe(
     language: str = typer.Option(None, help="Language code, e.g. en"),
     no_diarize: bool = typer.Option(False, help="Disable speaker diarization"),
     title: str = typer.Option("", help="Lecture title"),
-    course: str = typer.Option("", help="Course name/code"),
+    course: str = typer.Option("", help="Course name/code, e.g. Anthropology C1001"),
+    teacher: str = typer.Option("", help="Teacher/professor name"),
+    folder: str | None = typer.Option(None, help="Folder name to file under"),
 ) -> None:
     """Transcribe an audio file and save it as a session."""
     if model:
         get_model(model)  # validate early
-    session = LectureSession(title=title or audio.stem, course=course)
+    session = LectureSession(
+        title=title or audio.stem,
+        course=course,
+        teacher=teacher,
+        folder_id=_folder_id(folder),
+    )
     session.audio_path = audio
     with console.status("Transcribing..."):
         result = session.transcribe(model=model, language=language, diarize=not no_diarize)
@@ -88,10 +107,13 @@ def transcribe(
 def sessions() -> None:
     """List recorded lecture sessions."""
     rows = SessionStore().list()
+    folder_names = {f.id: f.name for f in FolderStore().list()}
     table = Table(title="Lecture sessions")
     table.add_column("ID")
     table.add_column("Title")
     table.add_column("Course")
+    table.add_column("Teacher")
+    table.add_column("Folder")
     table.add_column("Created")
     table.add_column("Transcript")
     for s in rows:
@@ -99,6 +121,8 @@ def sessions() -> None:
             s.id,
             s.title or "-",
             s.course or "-",
+            s.teacher or "-",
+            folder_names.get(s.folder_id, "-") if s.folder_id else "-",
             s.created_at.strftime("%Y-%m-%d %H:%M"),
             "yes" if s.transcript else "no",
         )
@@ -127,6 +151,15 @@ def show(session_id: str = typer.Argument(..., help="Session ID")) -> None:
     if not session.transcript:
         console.print("No transcript for this session yet.")
         raise typer.Exit(1)
+    meta = [p for p in (session.course, session.teacher) if p]
+    folder = FolderStore().get(session.folder_id).name if session.folder_id else None
+    if folder:
+        meta.append(f"[{folder}]")
+    console.print(
+        f"[bold]{session.title or session.id}[/bold]"
+        + (f" ({' · '.join(meta)})" if meta else "")
+        + f" — recorded {session.created_at.strftime('%Y-%m-%d %H:%M')}"
+    )
     for seg in session.transcript.segments:
         speaker = f"[cyan]{seg.speaker}[/cyan] " if seg.speaker else ""
         stamp = f"{seg.start:7.1f}s"

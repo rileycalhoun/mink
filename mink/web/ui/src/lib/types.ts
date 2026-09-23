@@ -41,6 +41,8 @@ export interface SessionDetail {
 	id: string;
 	title: string;
 	course: string;
+	teacher: string;
+	folder_id: string | null;
 	created_at: string;
 	audio_path: string | null;
 	transcript: Transcript | null;
@@ -51,10 +53,25 @@ export interface SessionListItem {
 	id: string;
 	title: string;
 	course: string;
+	teacher: string;
+	folder_id: string | null;
 	created_at: string;
 	has_transcript: boolean;
 	has_summary: boolean;
 	has_audio: boolean;
+}
+
+export interface Folder {
+	id: string;
+	name: string;
+	created_at: string;
+}
+
+export interface SessionMetadataPatch {
+	title?: string;
+	course?: string;
+	teacher?: string;
+	folder_id?: string | null;
 }
 
 export interface SearchHit {

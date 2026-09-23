@@ -54,3 +54,27 @@ class SessionStore:
             if audio.parent == settings.audio_dir.resolve() and audio.is_file():
                 audio.unlink()
         return True
+
+    _EDITABLE = ("title", "course", "teacher", "folder_id")
+
+    def update(self, session_id: str, **fields) -> LectureSession | None:
+        """Update editable metadata fields; returns the session, or None if missing."""
+        path = (self.sessions_dir / f"{session_id}.json").resolve()
+        if path.parent != self.sessions_dir.resolve() or not path.is_file():
+            return None
+        session = LectureSession.load(session_id)
+        for key, value in fields.items():
+            if key in self._EDITABLE:
+                setattr(session, key, value)
+        session.save()
+        return session
+
+    def clear_folder(self, folder_id: str) -> int:
+        """Remove every session from a folder (used when the folder is deleted)."""
+        cleared = 0
+        for session in self.list():
+            if session.folder_id == folder_id:
+                session.folder_id = None
+                session.save()
+                cleared += 1
+        return cleared

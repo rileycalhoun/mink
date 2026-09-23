@@ -8,10 +8,14 @@
 	import { AudioCapture } from '$lib/audio';
 	import { formatClock } from '$lib/format';
 	import { LiveClient, type LiveStatus } from '$lib/live';
-	import type { LiveSegment } from '$lib/types';
+	import { listFolders } from '$lib/api';
+	import type { Folder, LiveSegment } from '$lib/types';
 
 	let title = $state('');
 	let course = $state('');
+	let teacher = $state('');
+	let folderId = $state('');
+	let folders = $state<Folder[]>([]);
 	let devices = $state<MediaDeviceInfo[]>([]);
 	let deviceId = $state<string>('');
 	let status = $state<LiveStatus>('idle');
@@ -19,6 +23,12 @@
 	let level = $state(0);
 	let error = $state<string | null>(null);
 	let autoScroll = $state(true);
+
+	$effect(() => {
+		listFolders()
+			.then((f) => (folders = f))
+			.catch(() => {});
+	});
 
 	// Live segments merged by start time as partials stream in. SvelteMap is
 	// deeply reactive on its own — no $state wrapper needed.
@@ -111,7 +121,12 @@
 			await cap.start(deviceId || undefined);
 			devices = await AudioCapture.listDevices();
 
-			await live.connect({ title: title.trim(), course: course.trim() });
+			await live.connect({
+				title: title.trim(),
+				course: course.trim(),
+				teacher: teacher.trim(),
+				folder_id: folderId || null
+			});
 		} catch (e) {
 			error = e instanceof DOMException ? friendlyMicError(e) : e instanceof Error ? e.message : String(e);
 			cleanup();
@@ -172,9 +187,24 @@
 				<label for="live-title">Title</label>
 				<input id="live-title" class="input" bind:value={title} placeholder="e.g. Lecture 5: Sorting" disabled={busy} />
 			</div>
+			<div class="field-row">
+				<div class="field">
+					<label for="live-course">Course</label>
+					<input id="live-course" class="input" bind:value={course} placeholder="e.g. Anthropology C1001" disabled={busy} />
+				</div>
+				<div class="field">
+					<label for="live-teacher">Teacher</label>
+					<input id="live-teacher" class="input" bind:value={teacher} placeholder="e.g. Dr. Alvarez" disabled={busy} />
+				</div>
+			</div>
 			<div class="field">
-				<label for="live-course">Course</label>
-				<input id="live-course" class="input" bind:value={course} placeholder="e.g. CS 101" disabled={busy} />
+				<label for="live-folder">Folder</label>
+				<select id="live-folder" class="input" bind:value={folderId} disabled={busy}>
+					<option value="">No folder</option>
+					{#each folders as folder (folder.id)}
+						<option value={folder.id}>{folder.name}</option>
+					{/each}
+				</select>
 			</div>
 			<div class="field">
 				<label for="live-device">Microphone</label>
@@ -396,6 +426,12 @@
 		color: var(--muted-text);
 		font-variant-numeric: tabular-nums;
 		min-width: 3.4rem;
+	}
+
+	.field-row {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: 0.75rem;
 	}
 
 	.seg-text {

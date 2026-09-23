@@ -5,8 +5,18 @@
 	import ConfirmDialog from '$lib/ui/ConfirmDialog.svelte';
 	import Modal from '$lib/ui/Modal.svelte';
 	import SessionCard from '$lib/ui/SessionCard.svelte';
-	import { ApiError, deleteSession, listSessions, searchSessions, uploadAudio } from '$lib/api';
-	import type { SearchHit, SessionListItem } from '$lib/types';
+	import {
+		ApiError,
+		createFolder,
+		deleteFolder,
+		deleteSession,
+		listFolders,
+		listSessions,
+		renameFolder,
+		searchSessions,
+		uploadAudio
+	} from '$lib/api';
+	import type { Folder, SearchHit, SessionListItem } from '$lib/types';
 
 	let query = $state('');
 	let all = $state.raw<SessionListItem[]>([]);
@@ -15,11 +25,50 @@
 	let searching = $state(false);
 	let error = $state<string | null>(null);
 
+	// Folders
+	let folders = $state.raw<Folder[]>([]);
+	/** 'all' | 'unfiled' | folder id */
+	let folderFilter = $state('all');
+	let creatingFolder = $state(false);
+	let newFolderName = $state('');
+	let renamingId = $state<string | null>(null);
+	let renameValue = $state('');
+	let folderBusy = $state(false);
+	let folderError = $state<string | null>(null);
+	let pendingFolderDelete = $state<Folder | null>(null);
+	let folderDeleteOpen = $state(false);
+
+	$effect(() => {
+		if (!folderDeleteOpen) pendingFolderDelete = null;
+	});
+
+	const counts = $derived.by(() => {
+		const map = new Map<string, number>();
+		let unfiled = 0;
+		for (const s of all) {
+			if (s.folder_id) map.set(s.folder_id, (map.get(s.folder_id) ?? 0) + 1);
+			else unfiled++;
+		}
+		return { map, unfiled };
+	});
+
+	const visible = $derived(
+		folderFilter === 'all'
+			? all
+			: folderFilter === 'unfiled'
+				? all.filter((s) => !s.folder_id)
+				: all.filter((s) => s.folder_id === folderFilter)
+	);
+
 	// Upload modal state
 	let showUpload = $state(false);
 	let file = $state<File | null>(null);
 	let upTitle = $state('');
 	let upCourse = $state('');
+	let upTeacher = $state('');
+	let upFolderId = $state('');
+	let upNewFolder = $state('');
+	let showNewFolderInput = $state(false);
 	let dragging = $state(false);
 	let uploading = $state(false);
 	let transcribing = $state(false);
@@ -57,9 +106,74 @@
 		}
 	}
 
+	// --- Folders -----------------------------------------------------------
+	async function submitNewFolder() {
+		const name = newFolderName.trim();
+		if (!name) return;
+		folderBusy = true;
+		folderError = null;
+		try {
+			const folder = await createFolder(name);
+			folders = [...folders.filter((f) => f.id !== folder.id), folder].sort((a, b) =>
+				a.name.localeCompare(b.name)
+			);
+			newFolderName = '';
+			creatingFolder = false;
+			folderFilter = folder.id;
+		} catch (e) {
+			folderError = e instanceof Error ? e.message : 'Could not create folder.';
+		} finally {
+			folderBusy = false;
+		}
+	}
+
+	async function submitRename() {
+		const id = renamingId;
+		const name = renameValue.trim();
+		if (!id || !name) {
+			renamingId = null;
+			return;
+		}
+		folderBusy = true;
+		folderError = null;
+		try {
+			const folder = await renameFolder(id, name);
+			folders = folders.map((f) => (f.id === id ? folder : f));
+			renamingId = null;
+		} catch (e) {
+			folderError = e instanceof Error ? e.message : 'Could not rename folder.';
+		} finally {
+			folderBusy = false;
+		}
+	}
+
+	async function confirmDeleteFolder() {
+		if (!pendingFolderDelete) return;
+		folderBusy = true;
+		folderError = null;
+		try {
+			await deleteFolder(pendingFolderDelete.id);
+			folders = folders.filter((f) => f.id !== pendingFolderDelete!.id);
+			// Deleting a folder unfiles its sessions (the API clears folder_id).
+			all = all.map((s) =>
+				s.folder_id === pendingFolderDelete!.id ? { ...s, folder_id: null } : s
+			);
+			if (folderFilter === pendingFolderDelete.id) folderFilter = 'all';
+			pendingFolderDelete = null;
+			folderDeleteOpen = false;
+		} catch (e) {
+			folderError = e instanceof Error ? e.message : 'Could not delete folder.';
+		} finally {
+			folderBusy = false;
+		}
+	}
+
 	$effect(() => {
-		listSessions()
-			.then((s) => (all = s))
+		Promise.all([listSessions(), listFolders()])
+			.then(([s, f]) => {
+				all = s;
+				folders = f;
+			})
 			.catch((e) => (error = e instanceof Error ? e.message : 'Failed to load sessions.'))
 			.finally(() => (loading = false));
 	});
@@ -99,9 +213,22 @@
 		uploadError = null;
 		progress = 0;
 		try {
+			let folderId: string | null = upFolderId || null;
+			if (showNewFolderInput && upNewFolder.trim()) {
+				const folder = await createFolder(upNewFolder.trim());
+				folders = [...folders.filter((f) => f.id !== folder.id), folder].sort((a, b) =>
+					a.name.localeCompare(b.name)
+				);
+				folderId = folder.id;
+			}
 			const { id } = await uploadAudio(
 				file,
-				{ title: upTitle.trim(), course: upCourse.trim() },
+				{
+					title: upTitle.trim(),
+					course: upCourse.trim(),
+					teacher: upTeacher.trim(),
+					folder_id: folderId
+				},
 				(f) => (progress = f),
 				() => (transcribing = true)
 			);
@@ -125,6 +252,10 @@
 		file = null;
 		upTitle = '';
 		upCourse = '';
+		upTeacher = '';
+		upFolderId = '';
+		upNewFolder = '';
+		showNewFolderInput = false;
 		progress = 0;
 		transcribing = false;
 		uploadError = null;
@@ -150,6 +281,131 @@
 		</div>
 	</div>
 
+	<div class="body">
+		<aside class="sidebar" aria-label="Folders">
+			<div class="side-head">
+				<span class="side-title">Folders</span>
+				<button
+					class="icon-btn"
+					onclick={() => {
+						creatingFolder = true;
+						folderError = null;
+					}}
+					aria-label="New folder"
+					title="New folder"
+				>
+					<Icon name="plus" size={15} />
+				</button>
+			</div>
+
+			<button
+				class="folder-item"
+				class:active={folderFilter === 'all'}
+				onclick={() => (folderFilter = 'all')}
+			>
+				<Icon name="folder" size={15} />
+				<span class="folder-name">All sessions</span>
+				<span class="count">{all.length}</span>
+			</button>
+
+			{#each folders as folder (folder.id)}
+				<div class="folder-row" class:active={folderFilter === folder.id}>
+					{#if renamingId === folder.id}
+						<input
+							class="input rename-input"
+							bind:value={renameValue}
+							disabled={folderBusy}
+							onkeydown={(e) => {
+								if (e.key === 'Enter') submitRename();
+								if (e.key === 'Escape') renamingId = null;
+							}}
+							aria-label="Folder name"
+						/>
+						<button
+							class="icon-btn"
+							onclick={submitRename}
+							disabled={folderBusy}
+							aria-label="Save folder name"
+						>
+							<Icon name="check" size={14} />
+						</button>
+					{:else}
+						<button class="folder-item grow" onclick={() => (folderFilter = folder.id)}>
+							<Icon name="folder" size={15} />
+							<span class="folder-name">{folder.name}</span>
+							<span class="count">{counts.map.get(folder.id) ?? 0}</span>
+						</button>
+						<button
+							class="icon-btn row-btn"
+							onclick={() => {
+								renamingId = folder.id;
+								renameValue = folder.name;
+								folderError = null;
+							}}
+							aria-label={`Rename ${folder.name}`}
+							title="Rename"
+						>
+							<Icon name="pencil" size={13} />
+						</button>
+						<button
+							class="icon-btn row-btn danger"
+							onclick={() => {
+								folderError = null;
+								pendingFolderDelete = folder;
+								folderDeleteOpen = true;
+							}}
+							aria-label={`Delete ${folder.name}`}
+							title="Delete folder"
+						>
+							<Icon name="trash" size={13} />
+						</button>
+					{/if}
+				</div>
+			{/each}
+
+			{#if creatingFolder}
+				<div class="folder-row">
+					<input
+						class="input grow"
+						placeholder="Folder name"
+						bind:value={newFolderName}
+						disabled={folderBusy}
+						onkeydown={(e) => {
+							if (e.key === 'Enter') submitNewFolder();
+							if (e.key === 'Escape') {
+								creatingFolder = false;
+								newFolderName = '';
+							}
+						}}
+						aria-label="New folder name"
+					/>
+					<button
+						class="icon-btn"
+						onclick={submitNewFolder}
+						disabled={folderBusy || !newFolderName.trim()}
+						aria-label="Create folder"
+					>
+						<Icon name="check" size={14} />
+					</button>
+				</div>
+			{/if}
+
+			<button
+				class="folder-item"
+				class:active={folderFilter === 'unfiled'}
+				onclick={() => (folderFilter = 'unfiled')}
+			>
+				<Icon name="fileText" size={15} />
+				<span class="folder-name">Unfiled</span>
+				<span class="count">{counts.unfiled}</span>
+			</button>
+
+			{#if folderError}
+				<p class="error-text small" role="alert"><Icon name="alert" size={14} /> {folderError}</p>
+			{/if}
+		</aside>
+
+		<div class="main">
 	<div class="search-row">
 		<div class="search-box">
 			<Icon name="search" size={18} />
@@ -213,11 +469,17 @@
 				<p class="muted">Nothing in your library matches “{query.trim()}”.</p>
 			</div>
 		{/if}
-	{:else if all.length > 0}
+	{:else if visible.length > 0}
 		<div class="grid">
-			{#each all as session (session.id)}
+			{#each visible as session (session.id)}
 				<SessionCard {session} ondelete={() => askDelete(session)} />
 			{/each}
+		</div>
+	{:else if all.length > 0}
+		<div class="empty card">
+			<Icon name="folder" size={36} />
+			<p><strong>Nothing here yet</strong></p>
+			<p class="muted">No sessions in this folder. Upload or record one, or pick another folder.</p>
 		</div>
 	{:else}
 		<div class="empty card">
@@ -235,6 +497,8 @@
 			</div>
 		</div>
 	{/if}
+		</div><!-- /.main -->
+	</div><!-- /.body -->
 </div>
 
 <Modal bind:open={showUpload} title="Upload audio" onclose={resetUpload}>
@@ -273,9 +537,66 @@
 			<label for="up-title">Title</label>
 			<input id="up-title" class="input" bind:value={upTitle} placeholder="e.g. Lecture 4: Recursion" />
 		</div>
+		<div class="field-row">
+			<div class="field">
+				<label for="up-course">Course</label>
+				<input
+					id="up-course"
+					class="input"
+					bind:value={upCourse}
+					placeholder="e.g. Anthropology C1001"
+				/>
+			</div>
+			<div class="field">
+				<label for="up-teacher">Teacher</label>
+				<input
+					id="up-teacher"
+					class="input"
+					bind:value={upTeacher}
+					placeholder="e.g. Dr. Alvarez"
+				/>
+			</div>
+		</div>
 		<div class="field">
-			<label for="up-course">Course</label>
-			<input id="up-course" class="input" bind:value={upCourse} placeholder="e.g. CS 101" />
+			<label for="up-folder">Folder</label>
+			{#if showNewFolderInput}
+				<div class="folder-new">
+					<input
+						id="up-folder"
+						class="input"
+						bind:value={upNewFolder}
+						placeholder="New folder name"
+						aria-label="New folder name"
+					/>
+					<button
+						class="btn btn-ghost"
+						onclick={() => {
+							showNewFolderInput = false;
+							upNewFolder = '';
+						}}
+					>
+						Cancel
+					</button>
+				</div>
+			{:else}
+				<select
+					id="up-folder"
+					class="input"
+					bind:value={upFolderId}
+					onchange={(e) => {
+						if ((e.target as HTMLSelectElement).value === '__new__') {
+							upFolderId = '';
+							showNewFolderInput = true;
+						}
+					}}
+				>
+					<option value="">No folder</option>
+					{#each folders as folder (folder.id)}
+						<option value={folder.id}>{folder.name}</option>
+					{/each}
+					<option value="__new__">+ New folder…</option>
+				</select>
+			{/if}
 		</div>
 
 		{#if uploading}
@@ -318,6 +639,18 @@
 	busy={deleting}
 	error={deleteError}
 	onconfirm={confirmDeleteSession}
+/>
+
+<ConfirmDialog
+	bind:open={folderDeleteOpen}
+	title="Delete this folder?"
+	message={pendingFolderDelete
+		? `Delete the folder "${pendingFolderDelete.name}"? Its sessions are kept and moved to Unfiled. This can't be undone.`
+		: ''}
+	confirmLabel="Delete folder"
+	busy={folderBusy}
+	error={folderError}
+	onconfirm={confirmDeleteFolder}
 />
 
 <style>
@@ -411,6 +744,137 @@
 		display: grid;
 		grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
 		gap: 1.1rem;
+	}
+
+	.body {
+		display: grid;
+		grid-template-columns: 230px 1fr;
+		gap: 1.75rem;
+		align-items: start;
+	}
+
+	.main {
+		display: flex;
+		flex-direction: column;
+		gap: 1.25rem;
+		min-width: 0;
+	}
+
+	@media (max-width: 860px) {
+		.body {
+			grid-template-columns: 1fr;
+		}
+	}
+
+	/* Folder sidebar */
+	.sidebar {
+		display: flex;
+		flex-direction: column;
+		gap: 0.25rem;
+		padding: 1rem;
+		border: 1px solid rgba(148, 163, 184, 0.14);
+		border-radius: 0.9rem;
+		background: rgba(15, 23, 42, 0.45);
+		position: sticky;
+		top: 1rem;
+	}
+
+	.side-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		margin-bottom: 0.5rem;
+	}
+
+	.side-title {
+		font-size: 0.8rem;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+		color: var(--muted-text);
+	}
+
+	.folder-item {
+		all: unset;
+		cursor: pointer;
+		box-sizing: border-box;
+		display: flex;
+		align-items: center;
+		gap: 0.6rem;
+		width: 100%;
+		padding: 0.5rem 0.65rem;
+		border-radius: 0.6rem;
+		border: 1px solid transparent;
+		font-size: 0.92rem;
+		color: var(--text);
+	}
+
+	.folder-item:hover {
+		background: rgba(148, 163, 184, 0.08);
+	}
+
+	.folder-item.active {
+		background: rgba(34, 197, 94, 0.1);
+		border-color: rgba(34, 197, 94, 0.35);
+	}
+
+	.folder-item .folder-name {
+		flex: 1;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.folder-item .count {
+		font-size: 0.78rem;
+		color: var(--muted-text);
+		background: rgba(148, 163, 184, 0.12);
+		border-radius: 999px;
+		padding: 0.1rem 0.5rem;
+	}
+
+	.folder-row {
+		display: flex;
+		align-items: center;
+		gap: 0.25rem;
+		border-radius: 0.6rem;
+		border: 1px solid transparent;
+	}
+
+	.folder-row.active {
+		background: rgba(34, 197, 94, 0.1);
+		border-color: rgba(34, 197, 94, 0.35);
+	}
+
+	.folder-row .grow {
+		flex: 1;
+		min-width: 0;
+	}
+
+	.folder-row .folder-item {
+		border: none;
+		background: none;
+	}
+
+	.row-btn {
+		opacity: 0;
+		flex-shrink: 0;
+	}
+
+	.folder-row:hover .row-btn,
+	.row-btn:focus-visible {
+		opacity: 1;
+	}
+
+	.row-btn.danger:hover {
+		color: #f87171;
+		border-color: rgba(248, 113, 113, 0.5);
+		background: rgba(248, 113, 113, 0.08);
+	}
+
+	.rename-input {
+		flex: 1;
+		min-width: 0;
 	}
 
 	.skeleton {
@@ -583,5 +1047,24 @@
 		display: flex;
 		justify-content: flex-end;
 		gap: 0.75rem;
+	}
+
+	.field-row {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: 0.75rem;
+	}
+
+	.folder-new {
+		display: flex;
+		gap: 0.5rem;
+	}
+
+	.folder-new .input {
+		flex: 1;
+	}
+
+	select.input {
+		appearance: auto;
 	}
 </style>
