@@ -118,6 +118,14 @@ def get_session(session_id: str) -> dict:
     return _load_session_or_404(session_id).to_dict()
 
 
+@app.delete("/api/sessions/{session_id}", status_code=204)
+def delete_session(session_id: str) -> Response:
+    """Delete a session and its audio file. The UI always confirms first."""
+    if not store.delete(session_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+    return Response(status_code=204)
+
+
 @app.get("/api/search")
 def search(q: str) -> list[dict]:
     return [

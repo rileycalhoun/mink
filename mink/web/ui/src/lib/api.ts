@@ -32,6 +32,7 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 		}
 		throw new ApiError(res.status, detail);
 	}
+	if (res.status === 204) return undefined as T;
 	return (await res.json()) as T;
 }
 
@@ -51,6 +52,9 @@ export const listSessions = () => api<SessionListItem[]>('/api/sessions');
 
 export const getSession = (id: string) =>
 	api<SessionDetail>(`/api/sessions/${encodeURIComponent(id)}`);
+
+export const deleteSession = (id: string) =>
+	api<void>(`/api/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' });
 
 export const searchSessions = (q: string) =>
 	api<SearchHit[]>(`/api/search?q=${encodeURIComponent(q)}`);

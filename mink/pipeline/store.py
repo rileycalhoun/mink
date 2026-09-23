@@ -36,3 +36,21 @@ class SessionStore:
             if lines or query in session.transcript.text.lower():
                 hits.append((session, lines[:5]))
         return hits
+
+    def delete(self, session_id: str) -> bool:
+        """Delete a session's JSON and its audio file. Returns True if it existed.
+
+        Paths are validated to stay inside the data directories, so a crafted
+        id can never escape into the rest of the filesystem.
+        """
+        sessions_dir = self.sessions_dir.resolve()
+        path = (sessions_dir / f"{session_id}.json").resolve()
+        if path.parent != sessions_dir or not path.is_file():
+            return False
+        audio = LectureSession.load(session_id).audio_path
+        path.unlink()
+        if audio is not None:
+            audio = audio.resolve()
+            if audio.parent == settings.audio_dir.resolve() and audio.is_file():
+                audio.unlink()
+        return True

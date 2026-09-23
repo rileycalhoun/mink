@@ -1,11 +1,13 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
+	import { goto } from '$app/navigation';
 	import Icon from '$lib/Icon.svelte';
 	import AudioPlayer from '$lib/ui/AudioPlayer.svelte';
+	import ConfirmDialog from '$lib/ui/ConfirmDialog.svelte';
 	import ExportMenu from '$lib/ui/ExportMenu.svelte';
 	import SummaryPanel from '$lib/ui/SummaryPanel.svelte';
 	import TranscriptView from '$lib/ui/TranscriptView.svelte';
-	import { audioUrl, getSession } from '$lib/api';
+	import { audioUrl, deleteSession, getSession } from '$lib/api';
 	import { formatDate } from '$lib/format';
 	import type { SessionDetail, Summary } from '$lib/types';
 
@@ -18,6 +20,23 @@
 	const summary = $derived(generated ?? (data.session.summary as Summary | null));
 	let seekTo = $state<number | null>(null);
 	let currentTime = $state(0);
+	let confirmDelete = $state(false);
+	let deleting = $state(false);
+	let deleteError = $state<string | null>(null);
+
+	async function handleDelete() {
+		deleting = true;
+		deleteError = null;
+		try {
+			await deleteSession(data.session.id);
+			await goto(resolve('/'));
+		} catch (e) {
+			deleteError = e instanceof Error ? e.message : 'Delete failed.';
+		} finally {
+			deleting = false;
+			if (!deleteError) confirmDelete = false;
+		}
+	}
 
 	const session = $derived(liveSession ?? data.session);
 	const hasAudio = $derived(!!session.audio_path);
@@ -67,6 +86,16 @@
 			{#if session.transcript}
 				<ExportMenu sessionId={session.id} title={session.title} />
 			{/if}
+			<button
+				class="btn btn-ghost btn-danger-ghost"
+				onclick={() => {
+					deleteError = null;
+					confirmDelete = true;
+				}}
+				aria-label="Delete this session"
+			>
+				<Icon name="trash" size={15} /> Delete
+			</button>
 		</div>
 	</header>
 
@@ -103,6 +132,16 @@
 		</div>
 	{/if}
 </div>
+
+<ConfirmDialog
+	bind:open={confirmDelete}
+	title="Delete this session?"
+	message={`This permanently deletes "${session.title || 'Untitled lecture'}" — its transcript, summary, and audio recording. This can't be undone.`}
+	confirmLabel="Delete session"
+	busy={deleting}
+	error={deleteError}
+	onconfirm={handleDelete}
+/>
 
 <style>
 	.detail {
@@ -158,6 +197,16 @@
 		display: flex;
 		gap: 0.75rem;
 		align-items: center;
+	}
+
+	.btn-danger-ghost {
+		color: var(--muted-text);
+	}
+
+	.btn-danger-ghost:hover:not(:disabled) {
+		color: #f87171;
+		border-color: rgba(248, 113, 113, 0.5);
+		background: rgba(248, 113, 113, 0.08);
 	}
 
 	.content-grid {

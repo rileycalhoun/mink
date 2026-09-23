@@ -2,9 +2,10 @@
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import Icon from '$lib/Icon.svelte';
+	import ConfirmDialog from '$lib/ui/ConfirmDialog.svelte';
 	import Modal from '$lib/ui/Modal.svelte';
 	import SessionCard from '$lib/ui/SessionCard.svelte';
-	import { ApiError, listSessions, searchSessions, uploadAudio } from '$lib/api';
+	import { ApiError, deleteSession, listSessions, searchSessions, uploadAudio } from '$lib/api';
 	import type { SearchHit, SessionListItem } from '$lib/types';
 
 	let query = $state('');
@@ -24,6 +25,37 @@
 	let transcribing = $state(false);
 	let progress = $state(0);
 	let uploadError = $state<string | null>(null);
+
+	// Delete confirmation state
+	let pendingDelete = $state<SessionListItem | null>(null);
+	let deleteOpen = $state(false);
+	let deleting = $state(false);
+	let deleteError = $state<string | null>(null);
+
+	$effect(() => {
+		if (!deleteOpen) pendingDelete = null;
+	});
+
+	function askDelete(session: SessionListItem) {
+		deleteError = null;
+		pendingDelete = session;
+		deleteOpen = true;
+	}
+
+	async function confirmDeleteSession() {
+		if (!pendingDelete) return;
+		deleting = true;
+		deleteError = null;
+		try {
+			await deleteSession(pendingDelete.id);
+			all = all.filter((s) => s.id !== pendingDelete!.id);
+			deleteOpen = false;
+		} catch (e) {
+			deleteError = e instanceof Error ? e.message : 'Delete failed.';
+		} finally {
+			deleting = false;
+		}
+	}
 
 	$effect(() => {
 		listSessions()
@@ -184,7 +216,7 @@
 	{:else if all.length > 0}
 		<div class="grid">
 			{#each all as session (session.id)}
-				<SessionCard {session} />
+				<SessionCard {session} ondelete={() => askDelete(session)} />
 			{/each}
 		</div>
 	{:else}
@@ -275,6 +307,18 @@
 		</div>
 	</div>
 </Modal>
+
+<ConfirmDialog
+	bind:open={deleteOpen}
+	title="Delete this session?"
+	message={pendingDelete
+		? `This permanently deletes "${pendingDelete.title || 'Untitled lecture'}" — its transcript, summary, and audio recording. This can't be undone.`
+		: ''}
+	confirmLabel="Delete session"
+	busy={deleting}
+	error={deleteError}
+	onconfirm={confirmDeleteSession}
+/>
 
 <style>
 	.library {

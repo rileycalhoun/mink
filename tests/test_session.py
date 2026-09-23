@@ -62,3 +62,43 @@ def test_load_session_without_transcript(tmp_path, monkeypatch):
     loaded = LectureSession.load(original.id)
     assert loaded.transcript is None
     assert loaded.title == "Untranscribed"
+
+
+def test_store_delete_removes_json_and_audio(tmp_path, monkeypatch):
+    """SessionStore.delete removes the session file and its audio file."""
+    from mink.pipeline.store import SessionStore
+
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    settings.audio_dir.mkdir(parents=True)
+    settings.sessions_dir.mkdir(parents=True)
+
+    session = _session()
+    audio_file = settings.audio_dir / "clip.wav"
+    audio_file.write_bytes(b"fake-wav")
+    session.audio_path = audio_file
+    session.save()
+
+    store = SessionStore()
+    assert store.delete(session.id) is True
+    assert not (settings.sessions_dir / f"{session.id}.json").exists()
+    assert not audio_file.exists()
+
+
+def test_store_delete_missing_returns_false(tmp_path, monkeypatch):
+    from mink.pipeline.store import SessionStore
+
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    settings.sessions_dir.mkdir(parents=True)
+
+    store = SessionStore()
+    assert store.delete("nope") is False
+
+
+def test_store_delete_rejects_path_traversal(tmp_path, monkeypatch):
+    from mink.pipeline.store import SessionStore
+
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    settings.sessions_dir.mkdir(parents=True)
+
+    store = SessionStore()
+    assert store.delete("../../etc/passwd") is False
