@@ -64,6 +64,7 @@ C → S <binary PCM16 16kHz mono>
 S → C {"type": "partial", "segments": [{start, end, text}], "text", "duration"}
 C → S {"type": "stop"}
 S → C {"type": "finalizing"}
+S → C {"type": "finalize_progress", "elapsed_s"}  (heartbeat every 15 s while finalizing)
 S → C {"type": "done", "session_id"} | {"type": "error", "message"}
 ```
 

@@ -5,6 +5,7 @@
  *   -> {"type":"start","title?","course?","model?"}   <- {"type":"started","session_id"}
  *   -> binary 16-bit PCM mono @16kHz                  <- {"type":"partial","segments","text","duration"}
  *   -> {"type":"stop"}                                <- {"type":"finalizing"} … {"type":"done","session_id"}
+ *   <- {"type":"finalize_progress","elapsed_s"}        (heartbeat every 15 s while finalizing)
  *   <- {"type":"error","message"}
  */
 
@@ -35,6 +36,7 @@ export class LiveClient {
 	onStatus: (status: LiveStatus) => void = () => {};
 	onPartial: (partial: PartialMessage) => void = () => {};
 	onError: (message: string) => void = () => {};
+	onFinalizeProgress: (elapsedS: number) => void = () => {};
 
 	private ws: WebSocket | null = null;
 	private startedResolve: ((sessionId: string) => void) | null = null;
@@ -42,6 +44,8 @@ export class LiveClient {
 	private doneResolve: ((sessionId: string) => void) | null = null;
 	private doneReject: ((err: Error) => void) | null = null;
 	private settled = false;
+	/** Watchdog: no server message for this long while finalizing ⇒ dead socket. */
+	private finalizeTimer: ReturnType<typeof setTimeout> | null = null;
 
 	private setStatus(status: LiveStatus) {
 		this.onStatus(status);
@@ -120,10 +124,17 @@ export class LiveClient {
 			}
 			case 'finalizing': {
 				this.setStatus('finalizing');
+				this.armFinalizeWatchdog();
+				break;
+			}
+			case 'finalize_progress': {
+				this.onFinalizeProgress(Number(msg.elapsed_s ?? 0));
+				this.armFinalizeWatchdog();
 				break;
 			}
 			case 'done': {
 				this.settled = true;
+				this.clearFinalizeWatchdog();
 				const id = String(msg.session_id ?? '');
 				this.doneResolve?.(id);
 				this.doneResolve = null;
@@ -141,6 +152,7 @@ export class LiveClient {
 	private fail(message: string): void {
 		if (this.settled) return;
 		this.settled = true;
+		this.clearFinalizeWatchdog();
 		this.setStatus('error');
 		const err = new Error(message);
 		this.startedReject?.(err);
@@ -163,6 +175,8 @@ export class LiveClient {
 	/**
 	 * Ask the server to stop and run the final diarized pass.
 	 * Resolves with the session id on `done`. Rejects on `error`.
+	 * A watchdog fails the promise if the socket goes silent mid-finalize
+	 * (half-open connections otherwise hang on "Finalizing…" forever).
 	 */
 	stop(): Promise<string> {
 		return new Promise((resolve, reject) => {
@@ -180,8 +194,28 @@ export class LiveClient {
 				reject(new Error(message));
 			};
 			this.setStatus('finalizing');
+			this.armFinalizeWatchdog();
 			this.ws.send(JSON.stringify({ type: 'stop' }));
 		});
+	}
+
+	/**
+	 * (Re)start the finalize watchdog: three missed 15 s heartbeats and the
+	 * socket is treated as dead.
+	 */
+	private armFinalizeWatchdog(): void {
+		this.clearFinalizeWatchdog();
+		this.finalizeTimer = setTimeout(() => {
+			this.finalizeTimer = null;
+			this.fail('Lost connection to the transcription server during finalization.');
+		}, 45_000);
+	}
+
+	private clearFinalizeWatchdog(): void {
+		if (this.finalizeTimer !== null) {
+			clearTimeout(this.finalizeTimer);
+			this.finalizeTimer = null;
+		}
 	}
 
 	close(): void {
@@ -189,6 +223,7 @@ export class LiveClient {
 		this.startedReject = null;
 		this.doneResolve = null;
 		this.doneReject = null;
+		this.clearFinalizeWatchdog();
 		if (this.ws) {
 			try {
 				this.ws.close();

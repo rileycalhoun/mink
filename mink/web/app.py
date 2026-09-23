@@ -11,6 +11,7 @@ import asyncio
 import json
 import shutil
 import subprocess
+import time
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
@@ -340,6 +341,23 @@ def export_session(session_id: str, format: str = "md") -> Response:
 # ---------------------------------------------------------------------------
 
 
+async def _finalize_heartbeat(websocket: WebSocket) -> None:
+    """Send `finalize_progress` every 15 s until cancelled.
+
+    Lets the client show elapsed time during the full diarized pass and
+    detect a half-open socket (no heartbeat ⇒ connection is dead).
+    """
+    start = time.monotonic()
+    while True:
+        await asyncio.sleep(15)
+        try:
+            await websocket.send_json(
+                {"type": "finalize_progress", "elapsed_s": int(time.monotonic() - start)}
+            )
+        except Exception:  # noqa: BLE001 — socket died; stop beating
+            return
+
+
 @app.websocket("/api/live/ws")
 async def live_ws(websocket: WebSocket) -> None:
     """Live transcription protocol (see docs/architecture.md).
@@ -351,7 +369,8 @@ async def live_ws(websocket: WebSocket) -> None:
     Server → client (text JSON):
       {"type": "started", "session_id"}
       {"type": "partial", "segments": [{start, end, text}], "text", "duration"}
-      {"type": "finalizing"} / {"type": "done", "session_id"} / {"type": "error", "message"}
+      {"type": "finalizing"} / {"type": "finalize_progress", "elapsed_s"} /
+      {"type": "done", "session_id"} / {"type": "error", "message"}
     """
     await websocket.accept()
     session = None
@@ -375,12 +394,18 @@ async def live_ws(websocket: WebSocket) -> None:
                         await websocket.send_json({"type": "error", "message": "no live session"})
                         continue
                     await websocket.send_json({"type": "finalizing"})
+                    # Heartbeat while the full diarized pass runs: the client
+                    # shows elapsed time and treats a silent socket as dead
+                    # instead of hanging on "Finalizing…" forever.
+                    beat = asyncio.create_task(_finalize_heartbeat(websocket))
                     try:
                         # Full diarized pass over the whole recording.
                         await asyncio.to_thread(session.finalize)
                     except Exception as exc:  # noqa: BLE001 — report engine failures to client
                         await websocket.send_json({"type": "error", "message": str(exc)})
                         continue
+                    finally:
+                        beat.cancel()
                     live_manager.remove(session.id)
                     await websocket.send_json({"type": "done", "session_id": session.id})
                     return

@@ -20,6 +20,7 @@
 	let deviceId = $state<string>('');
 	let status = $state<LiveStatus>('idle');
 	let elapsed = $state(0);
+	let finalizeElapsed = $state(0);
 	let level = $state(0);
 	let error = $state<string | null>(null);
 	let autoScroll = $state(true);
@@ -99,6 +100,7 @@
 	async function start() {
 		error = null;
 		segMap.clear();
+		finalizeElapsed = 0;
 
 		const cap = new AudioCapture();
 		const live = new LiveClient();
@@ -109,6 +111,7 @@
 		live.onPartial = (p) => {
 			for (const s of p.segments) segMap.set(s.start.toFixed(1), s);
 		};
+		live.onFinalizeProgress = (s) => (finalizeElapsed = s);
 		live.onError = (m) => {
 			error = m;
 			cleanup();
@@ -171,7 +174,7 @@
 		</div>
 		<div class="status-line" role="status">
 			<span class="pulse-dot" class:live={status === 'listening' || status === 'connecting'}></span>
-			<span class={status === 'error' ? 'status-error' : ''}>{STATUS_LABEL[status]}</span>
+			<span class={status === 'error' ? 'status-error' : ''}>{STATUS_LABEL[status]}{status === 'finalizing' && finalizeElapsed > 0 ? ` (${formatClock(finalizeElapsed)} elapsed)` : ''}</span>
 		</div>
 	</div>
 
@@ -229,7 +232,7 @@
 				</button>
 			{:else if status === 'finalizing'}
 				<button class="btn btn-secondary btn-big" disabled>
-					<span class="spinner" aria-hidden="true"></span> Finalizing…
+					<span class="spinner" aria-hidden="true"></span> Finalizing…{finalizeElapsed > 0 ? ` ${formatClock(finalizeElapsed)}` : ''}
 				</button>
 			{:else}
 				<button class="btn btn-danger btn-big" onclick={stop}>
