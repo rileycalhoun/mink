@@ -11,10 +11,15 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import time
+
 import httpx
 
 from mink.config import settings
 from mink.engine.manager import engine_manager
+
+_RETRY_ATTEMPTS = 3
+_RETRY_BACKOFF_S = 5.0
 
 
 @dataclass
@@ -87,18 +92,29 @@ class EngineClient:
             data["language"] = language
 
         try:
-            with (
-                httpx.Client(trust_env=False, timeout=self.timeout) as client,
-                open(audio, "rb") as fh,
-            ):
-                files = {"file": (audio.name, fh, "audio/wav")}
-                resp = client.post(
-                    f"{self.base_url}/v1/audio/transcriptions",
-                    data=data,
-                    files=files,
-                    headers=self._headers(),
-                )
-            resp.raise_for_status()
+            for attempt in range(_RETRY_ATTEMPTS):
+                try:
+                    with (
+                        httpx.Client(trust_env=False, timeout=self.timeout) as client,
+                        open(audio, "rb") as fh,
+                    ):
+                        files = {"file": (audio.name, fh, "audio/wav")}
+                        resp = client.post(
+                            f"{self.base_url}/v1/audio/transcriptions",
+                            data=data,
+                            files=files,
+                            headers=self._headers(),
+                        )
+                    resp.raise_for_status()
+                    break
+                except httpx.HTTPStatusError as exc:
+                    if (
+                        exc.response.status_code in (502, 503, 504)
+                        and attempt < _RETRY_ATTEMPTS - 1
+                    ):
+                        time.sleep(_RETRY_BACKOFF_S * (attempt + 1))
+                        continue
+                    raise
         except httpx.HTTPError as exc:
             raise EngineError(
                 f"Transcription request failed (is the engine running? "

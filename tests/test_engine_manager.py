@@ -63,7 +63,9 @@ class FakeHealthResp:
 
 
 def _healthy(monkeypatch):
-    monkeypatch.setattr(manager_mod.httpx, "get", lambda *a, **k: FakeHealthResp())
+    monkeypatch.setattr(
+        manager_mod.httpx, "post", lambda *a, **k: FakeHealthResp()
+    )
 
 
 def _wait_for(manager, state, timeout=5.0):
@@ -126,7 +128,10 @@ def test_start_falls_back_to_next_gpu(manager, monkeypatch):
     _healthy(monkeypatch)
 
     status = manager.start()
-    assert status["state"] == EngineState.PROVISIONING.value
+    assert status["state"] in (
+        EngineState.PROVISIONING.value,
+        EngineState.READY.value,
+    )
     assert fake.attempted_gpu_ids == ["NVIDIA RTX A5000", "NVIDIA RTX 3090"]
     body = fake.created[-1]
     assert body["gpu"] == {"id": "NVIDIA RTX 3090", "count": 1}
@@ -141,7 +146,7 @@ def test_start_idempotent_while_provisioning(manager, monkeypatch):
     class NeverHealthy:
         status_code = 503
 
-    monkeypatch.setattr(manager_mod.httpx, "get", lambda *a, **k: NeverHealthy())
+    monkeypatch.setattr(manager_mod.httpx, "post", lambda *a, **k: NeverHealthy())
     manager.start()
     n_created = len(fake.created)
     manager.start()

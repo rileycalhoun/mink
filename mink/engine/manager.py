@@ -341,20 +341,49 @@ class EngineManager:
                 api_key = self._api_key
                 if self._state is not EngineState.PROVISIONING:
                     raise RunPodError("Startup cancelled")
-            url = f"https://{pod_id}-{ENGINE_PORT}.proxy.runpod.net/health"
-            try:
-                resp = httpx.get(
-                    url,
-                    headers={"Authorization": f"Bearer {api_key}"},
-                    timeout=10.0,
-                    trust_env=False,
-                )
-                if resp.status_code < 500:
-                    return
-            except httpx.HTTPError:
-                pass
+            if self._probe_engine(pod_id, api_key):
+                return
             time.sleep(_HEALTH_POLL_S)
         raise RunPodError("Timed out waiting for the engine to become healthy")
+
+    def _probe_engine(self, pod_id: str | None, api_key: str | None) -> bool:
+        """True only when the engine actually transcribes.
+
+        /health can pass while nemo-speech is still loading models (we saw
+        404/502 on /v1/audio/transcriptions after /health went green), so the
+        readiness gate is a real probe transcription of a short silent WAV.
+        """
+        if not pod_id or not api_key:
+            return False
+        wav = self._probe_wav()
+        try:
+            resp = httpx.post(
+                f"https://{pod_id}-{ENGINE_PORT}.proxy.runpod.net"
+                "/v1/audio/transcriptions",
+                data={"model": "parakeet-tdt", "response_format": "verbose_json"},
+                files={"file": ("probe.wav", wav, "audio/wav")},
+                headers={"Authorization": f"Bearer {api_key}"},
+                timeout=60.0,
+                trust_env=False,
+            )
+            return resp.status_code == 200
+        except httpx.HTTPError:
+            return False
+
+    @staticmethod
+    def _probe_wav() -> bytes:
+        """0.5 s of 16 kHz mono 16-bit silence, valid WAV."""
+        import io
+        import struct
+        import wave
+
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(16000)
+            w.writeframes(struct.pack("<8000h", *([0] * 8000)))
+        return buf.getvalue()
 
     def _idle_worker(self) -> None:
         """Terminate the pod after the idle timeout. Runs for the process life."""
