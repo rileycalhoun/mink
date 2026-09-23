@@ -70,12 +70,11 @@ class RunPodClient:
         data = self._request("GET", "/v2/catalog/gpus?include=AVAILABILITY&product=POD")
         return data.get("gpus", [])
 
-    def cheapest_gpu(self) -> tuple[str, float]:
-        """Return (gpu_id, $/hr) of the cheapest GPU with current capacity.
-
-        Raises RunPodError when nothing is available.
+    def ranked_gpus(self) -> list[tuple[str, float]]:
+        """Return [(gpu_id, $/hr), ...] sorted cheapest-first for GPUs with
+        current capacity. Raises RunPodError when nothing is available.
         """
-        candidates = []
+        candidates: list[tuple[float, str]] = []
         for gpu in self.list_gpus():
             price = (gpu.get("price") or {}).get("community")
             if not isinstance(price, (int, float)):
@@ -84,11 +83,19 @@ class RunPodClient:
                 continue
             gid = gpu.get("id") or gpu.get("name")
             if gid:
-                candidates.append((price, gid))
+                candidates.append((float(price), gid))
         if not candidates:
             raise RunPodError("No GPUs with capacity in the RunPod catalog right now")
-        price, gid = min(candidates)
-        return gid, float(price)
+        candidates.sort()
+        return [(gid, price) for price, gid in candidates]
+
+    def cheapest_gpu(self) -> tuple[str, float]:
+        """Return (gpu_id, $/hr) of the cheapest GPU with current capacity.
+
+        Raises RunPodError when nothing is available.
+        """
+        gid, price = self.ranked_gpus()[0]
+        return gid, price
 
     # ------------------------------------------------------------------
     # Pods

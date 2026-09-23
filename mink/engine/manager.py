@@ -157,22 +157,35 @@ class EngineManager:
 
         try:
             client = self._client()
-            gpu_id, price = client.cheapest_gpu()
-            api_key = secrets.token_urlsafe(32)
-            body = {
-                "name": POD_NAME,
-                "cloud": "COMMUNITY",
-                "gpu": {"id": gpu_id, "count": 1},
-                "image": ENGINE_IMAGE,
-                "ports": [f"{ENGINE_PORT}/http"],
-                "disk": 20,
-                "env": {"NEMO_API_KEY": api_key},
-                "entrypoint": ["/bin/bash", "-c", _boot_script()],
-            }
-            pod = client.create_pod(body)
-            pod_id = pod.get("id")
-            if not pod_id:
-                raise RunPodError(f"Pod creation returned no id: {pod}")
+            pod_id = gpu_id = price = None
+            last_error: Exception | None = None
+            for gid, price in client.ranked_gpus():
+                api_key = secrets.token_urlsafe(32)
+                body = {
+                    "name": POD_NAME,
+                    "cloud": "COMMUNITY",
+                    "gpu": {"id": gid, "count": 1},
+                    "image": ENGINE_IMAGE,
+                    "ports": [f"{ENGINE_PORT}/http"],
+                    "disk": 20,
+                    "env": {"NEMO_API_KEY": api_key},
+                    "entrypoint": ["/bin/bash", "-c", _boot_script()],
+                }
+                try:
+                    pod = client.create_pod(body)
+                    pod_id = pod.get("id")
+                    if not pod_id:
+                        raise RunPodError(f"Pod creation returned no id: {pod}")
+                    gpu_id, price = gid, price
+                    break
+                except Exception as exc:  # noqa: BLE001 — try the next GPU
+                    last_error = exc
+            if pod_id is None:
+                raise RunPodError(
+                    f"No GPU placement available: {last_error}"
+                    if last_error
+                    else "No GPUs with capacity in the RunPod catalog right now"
+                )
         except Exception as exc:  # noqa: BLE001 — surface as ERROR state
             with self._lock:
                 self._state = EngineState.ERROR

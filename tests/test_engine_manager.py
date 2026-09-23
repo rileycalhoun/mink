@@ -27,17 +27,24 @@ def manager(monkeypatch, tmp_path):
 class FakeRunPod:
     """Stand-in for RunPodClient."""
 
-    def __init__(self, fail_create: bool = False):
+    def __init__(self, fail_create: bool = False, fail_gpu_ids: tuple = ()):
         self.fail_create = fail_create
+        self.fail_gpu_ids = set(fail_gpu_ids)
         self.terminated: list[str] = []
         self.created: list[dict] = []
+        self.attempted_gpu_ids: list[str] = []
+
+    def ranked_gpus(self):
+        return [("NVIDIA RTX A5000", 0.16), ("NVIDIA RTX 3090", 0.22)]
 
     def cheapest_gpu(self):
-        return ("NVIDIA RTX A5000", 0.16)
+        return self.ranked_gpus()[0]
 
     def create_pod(self, body):
         self.created.append(body)
-        if self.fail_create:
+        gid = (body.get("gpu") or {}).get("id")
+        self.attempted_gpu_ids.append(gid)
+        if self.fail_create or gid in self.fail_gpu_ids:
             raise RunPodError("no capacity")
         return {"id": "pod123"}
 
@@ -111,6 +118,20 @@ def test_start_failure_surfaces_error_state(manager, monkeypatch):
     status = manager.start()
     assert status["state"] == EngineState.ERROR.value
     assert "no capacity" in status["error"]
+
+
+def test_start_falls_back_to_next_gpu(manager, monkeypatch):
+    fake = FakeRunPod(fail_gpu_ids=("NVIDIA RTX A5000",))
+    monkeypatch.setattr(manager, "_client", lambda: fake)
+    _healthy(monkeypatch)
+
+    status = manager.start()
+    assert status["state"] == EngineState.PROVISIONING.value
+    assert fake.attempted_gpu_ids == ["NVIDIA RTX A5000", "NVIDIA RTX 3090"]
+    body = fake.created[-1]
+    assert body["gpu"] == {"id": "NVIDIA RTX 3090", "count": 1}
+    assert _wait_for(manager, EngineState.READY), "worker should reach READY"
+    assert manager.engine_url == "https://pod123-8000.proxy.runpod.net"
 
 
 def test_start_idempotent_while_provisioning(manager, monkeypatch):
